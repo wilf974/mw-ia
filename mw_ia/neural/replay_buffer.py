@@ -33,6 +33,11 @@ class ReplayBuffer:
     def __len__(self) -> int:
         return self._size
 
+    @property
+    def current_index(self) -> int:
+        """Position d'écriture courante dans le buffer circulaire."""
+        return self._idx
+
     def push(
         self,
         state: np.ndarray,
