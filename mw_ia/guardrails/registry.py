@@ -32,3 +32,16 @@ def invariant(id: str, applies_to: list[str]):
         return fn
 
     return decorator
+
+
+def applicable_invariants(spec: VariantSpec) -> list[Invariant]:
+    """Retourne les invariants pertinents pour ce spec.
+
+    Un invariant est applicable si tous les champs listés dans `applies_to`
+    sont présents et non-None dans le spec.
+    """
+    result = []
+    for inv in _REGISTRY.values():
+        if all(getattr(spec, fname, None) is not None for fname in inv.applies_to):
+            result.append(inv)
+    return result
