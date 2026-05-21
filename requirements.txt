@@ -8,3 +8,4 @@ PyQt6>=6.7
 pyqtgraph>=0.13
 gymnasium>=0.29
 pytest>=8.0
+hypothesis>=6.100
