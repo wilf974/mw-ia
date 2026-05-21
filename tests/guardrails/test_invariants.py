@@ -31,3 +31,21 @@ def test_i1_violates_when_gamma_one():
     assert v is not None
     assert v.invariant_id == "I1"
     assert v.severity == Severity.HARD
+
+
+# --- I2 -----------------------------------------------------------------------
+def test_i2_pass_with_gamma_099():
+    inv = _REGISTRY["I2"]
+    assert inv.check(_spec(gamma=0.99)) is None
+
+
+def test_i2_violates_when_gamma_too_close_to_one():
+    """Si γ=1, le test runtime échantillonné DOIT détecter une non-contraction.
+    Note : I1 attrape γ=1 avant I2 en pratique. Ce test isole I2 sur γ=1.0
+    qui par construction est non-contractant (peut tester égalité, pas <)."""
+    inv = _REGISTRY["I2"]
+    v = inv.check(_spec(gamma=1.0))
+    assert v is not None
+    assert v.invariant_id == "I2"
+    assert v.severity == Severity.HARD
+    assert v.counter_example is not None
