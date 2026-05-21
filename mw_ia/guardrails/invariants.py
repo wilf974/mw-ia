@@ -116,6 +116,41 @@ def winrate_bounds(spec: VariantSpec) -> Optional[Violation]:
     return None
 
 
+from mw_ia.neural.replay_buffer import ReplayBuffer
+
+
+@invariant("I6", applies_to=["replay_capacity"])
+def replay_buffer_capacity(spec: VariantSpec) -> Optional[Violation]:
+    """buffer.size ≤ capacity ∧ index < capacity, même après débordement.
+
+    Pousse capacity * 3 transitions dans un buffer de capacity définie par
+    le spec, vérifie qu'aucune borne n'est jamais franchie.
+    """
+    capacity = min(spec.replay_capacity, 1_000)  # cap pour rapidité du check
+    obs_dim = 2
+    buf = ReplayBuffer(capacity=capacity, obs_dim=obs_dim, seed=42)
+    rng = np.random.default_rng(seed=42)
+    for _ in range(capacity * 3):
+        s = rng.uniform(size=obs_dim).astype(np.float32)
+        sp = rng.uniform(size=obs_dim).astype(np.float32)
+        buf.push(s, action=0, reward=0.0, next_state=sp, done=False)
+        if len(buf) > capacity:
+            return Violation(
+                invariant_id="I6",
+                message=f"buffer.size={len(buf)} > capacity={capacity}",
+                severity=Severity.HARD,
+                counter_example={"size": len(buf), "capacity": capacity},
+            )
+        if buf._idx >= capacity:
+            return Violation(
+                invariant_id="I6",
+                message=f"buffer._idx={buf._idx} >= capacity={capacity}",
+                severity=Severity.HARD,
+                counter_example={"idx": int(buf._idx), "capacity": capacity},
+            )
+    return None
+
+
 def _compute_epsilon(t: int, eps_start: float, eps_end: float, decay_steps: int) -> float:
     """Schedule linéaire de ε(t) — référence pour I5.
 

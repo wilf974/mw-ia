@@ -74,3 +74,10 @@ def test_i5_violates_when_end_greater_than_start():
     v = inv.check(_spec(epsilon_start=0.05, epsilon_end=1.0))
     assert v is not None
     assert v.invariant_id == "I5"
+
+
+# --- I6 -----------------------------------------------------------------------
+def test_i6_replay_capacity_passes():
+    inv = _REGISTRY["I6"]
+    # Petit replay_capacity pour test rapide (override le default 100_000)
+    assert inv.check(_spec(replay_capacity=10)) is None
