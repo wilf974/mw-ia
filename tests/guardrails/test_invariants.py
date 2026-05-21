@@ -61,3 +61,16 @@ def test_i3_huber_nonneg_passes():
 def test_i4_winrate_bounds_passes():
     inv = _REGISTRY["I4"]
     assert inv.check(_spec()) is None
+
+
+# --- I5 -----------------------------------------------------------------------
+def test_i5_pass_with_decreasing_schedule():
+    inv = _REGISTRY["I5"]
+    assert inv.check(_spec(epsilon_start=1.0, epsilon_end=0.05)) is None
+
+
+def test_i5_violates_when_end_greater_than_start():
+    inv = _REGISTRY["I5"]
+    v = inv.check(_spec(epsilon_start=0.05, epsilon_end=1.0))
+    assert v is not None
+    assert v.invariant_id == "I5"

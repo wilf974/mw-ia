@@ -116,6 +116,42 @@ def winrate_bounds(spec: VariantSpec) -> Optional[Violation]:
     return None
 
 
+def _compute_epsilon(t: int, eps_start: float, eps_end: float, decay_steps: int) -> float:
+    """Schedule linéaire de ε(t) — référence pour I5.
+
+    Identique à la formule utilisée par DQNAgent en V1.
+    """
+    if t >= decay_steps:
+        return eps_end
+    return eps_start + (eps_end - eps_start) * (t / decay_steps)
+
+
+@invariant("I5", applies_to=["epsilon_start", "epsilon_end", "epsilon_decay_steps"])
+def epsilon_schedule_decreasing(spec: VariantSpec) -> Optional[Violation]:
+    """ε_{t+1} ≤ ε_t et ε_t ∈ [0,1] sur tout l'horizon."""
+    prev = spec.epsilon_start
+    horizon = 2 * spec.epsilon_decay_steps
+    step = max(1, horizon // 100)
+    for t in range(0, horizon + 1, step):
+        eps = _compute_epsilon(t, spec.epsilon_start, spec.epsilon_end, spec.epsilon_decay_steps)
+        if not (0.0 <= eps <= 1.0):
+            return Violation(
+                invariant_id="I5",
+                message=f"epsilon(t={t})={eps} hors [0,1]",
+                severity=Severity.HARD,
+                counter_example={"t": t, "epsilon": eps},
+            )
+        if eps > prev + 1e-9:
+            return Violation(
+                invariant_id="I5",
+                message=f"epsilon non décroissant : eps(t={t})={eps} > prev={prev}",
+                severity=Severity.HARD,
+                counter_example={"t": t, "prev": prev, "epsilon": eps},
+            )
+        prev = eps
+    return None
+
+
 def _huber(y: float, y_hat: float, delta: float = 1.0) -> float:
     """Huber loss (référence pédagogique, indépendante de torch)."""
     diff = y - y_hat
