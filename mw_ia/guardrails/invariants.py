@@ -89,6 +89,33 @@ def bellman_contraction(spec: VariantSpec) -> Optional[Violation]:
     return None
 
 
+from mw_ia.config import TrainingConfig
+from mw_ia.training.metrics import MetricsTracker
+
+
+@invariant("I4", applies_to=[])
+def winrate_bounds(spec: VariantSpec) -> Optional[Violation]:
+    """winrate ∈ [0, 1] sur fenêtre glissante.
+
+    Vérifié en alimentant MetricsTracker avec 200 résultats aléatoires
+    et en confirmant que winrate() reste borné.
+    """
+    rng = np.random.default_rng(seed=42)
+    tracker = MetricsTracker(TrainingConfig())
+    for _ in range(200):
+        success = bool(rng.integers(0, 2))
+        tracker.record_episode(reward=0.0, length=1, success=success)
+        wr = tracker.winrate()
+        if not (0.0 <= wr <= 1.0):
+            return Violation(
+                invariant_id="I4",
+                message=f"winrate={wr} hors [0,1]",
+                severity=Severity.HARD,
+                counter_example={"winrate": wr},
+            )
+    return None
+
+
 def _huber(y: float, y_hat: float, delta: float = 1.0) -> float:
     """Huber loss (référence pédagogique, indépendante de torch)."""
     diff = y - y_hat

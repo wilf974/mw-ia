@@ -55,3 +55,9 @@ def test_i2_violates_when_gamma_too_close_to_one():
 def test_i3_huber_nonneg_passes():
     inv = _REGISTRY["I3"]
     assert inv.check(_spec()) is None
+
+
+# --- I4 -----------------------------------------------------------------------
+def test_i4_winrate_bounds_passes():
+    inv = _REGISTRY["I4"]
+    assert inv.check(_spec()) is None
