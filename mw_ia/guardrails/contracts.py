@@ -1,7 +1,7 @@
 """Dataclasses du contrat public guardrails."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Optional
 
@@ -60,3 +60,30 @@ class VariantSpec:
             raise ValueError(f"replay_capacity doit être > 0, reçu {self.replay_capacity}")
         if self.target_sync_steps <= 0:
             raise ValueError(f"target_sync_steps doit être > 0, reçu {self.target_sync_steps}")
+
+
+@dataclass(frozen=True)
+class VerdictReport:
+    """Résultat d'un appel verify_formal(spec)."""
+
+    passed: bool
+    violations: tuple[Violation, ...]
+    spec: VariantSpec
+    duration_ms: float
+
+    def to_dict(self) -> dict:
+        """Sérialisation JSON-ready pour logs/debug."""
+        return {
+            "passed": self.passed,
+            "violations": [
+                {
+                    "invariant_id": v.invariant_id,
+                    "message": v.message,
+                    "severity": v.severity.value,
+                    "counter_example": v.counter_example,
+                }
+                for v in self.violations
+            ],
+            "spec": asdict(self.spec),
+            "duration_ms": self.duration_ms,
+        }

@@ -1,9 +1,11 @@
 """Tests des dataclasses contracts du module guardrails."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from mw_ia.guardrails.contracts import Severity, Violation, VariantSpec
+from mw_ia.guardrails.contracts import Severity, Violation, VariantSpec, VerdictReport
 
 
 def test_severity_has_hard_and_soft():
@@ -83,3 +85,35 @@ def test_variant_spec_is_frozen():
     spec = VariantSpec(**_valid_spec_kwargs())
     with pytest.raises(Exception):
         spec.gamma = 0.5  # type: ignore[misc]
+
+
+def test_verdict_report_passed_when_no_violations():
+    spec = VariantSpec(**_valid_spec_kwargs())
+    report = VerdictReport(passed=True, violations=(), spec=spec, duration_ms=12.3)
+    assert report.passed is True
+    assert report.violations == ()
+
+
+def test_verdict_report_failed_with_violations():
+    spec = VariantSpec(**_valid_spec_kwargs())
+    v1 = Violation("I1", "gamma=1.5", Severity.HARD)
+    report = VerdictReport(passed=False, violations=(v1,), spec=spec, duration_ms=4.5)
+    assert report.passed is False
+    assert len(report.violations) == 1
+
+
+def test_verdict_report_to_dict_is_json_serializable():
+    spec = VariantSpec(**_valid_spec_kwargs())
+    v1 = Violation("I1", "gamma hors (0,1)", Severity.HARD)
+    report = VerdictReport(passed=False, violations=(v1,), spec=spec, duration_ms=4.5)
+    d = report.to_dict()
+    serialized = json.dumps(d)
+    assert "I1" in serialized
+    assert "hard" in serialized
+
+
+def test_verdict_report_is_frozen():
+    spec = VariantSpec(**_valid_spec_kwargs())
+    report = VerdictReport(passed=True, violations=(), spec=spec, duration_ms=1.0)
+    with pytest.raises(Exception):
+        report.passed = False  # type: ignore[misc]
