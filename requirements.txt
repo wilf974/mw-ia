@@ -1,5 +1,8 @@
 # MW_IA V1 — dépendances Python.
-# torch + torchvision sont installés séparément avec l'index CUDA (voir README).
+# torch + torchvision sont installés séparément avec l'index CUDA :
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# Python 3.13 + RTX 3060 (Ampere) → wheels cu128 disponibles (cu121 obsolète pour 3.13).
+# Fallback CPU : pip install torch torchvision  (wheels CPU PyPI).
 numpy>=1.26
 PyQt6>=6.7
 pyqtgraph>=0.13
