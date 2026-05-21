@@ -102,3 +102,9 @@ def test_i7_not_applicable_when_bounds_none():
     spec = _spec()  # reward_min/max = None par défaut
     ids = [inv.id for inv in applicable_invariants(spec)]
     assert "I7" not in ids
+
+
+# --- I8 -----------------------------------------------------------------------
+def test_i8_termination_exclusive_passes():
+    inv = _REGISTRY["I8"]
+    assert inv.check(_spec()) is None

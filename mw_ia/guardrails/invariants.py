@@ -229,3 +229,32 @@ def huber_nonneg(spec: VariantSpec) -> Optional[Violation]:
                 counter_example={"y": y, "y_hat": y_hat, "loss": loss},
             )
     return None
+
+
+from mw_ia.envs.gridworld import Action, GridWorld
+
+
+@invariant("I8", applies_to=[])
+def episode_termination_exclusive(spec: VariantSpec) -> Optional[Violation]:
+    """∀ transition GridWorld : not (terminated ∧ truncated).
+
+    Simule 5 épisodes courts avec une politique aléatoire et vérifie que
+    les deux flags ne sont jamais True simultanément.
+    """
+    rng = np.random.default_rng(seed=42)
+    for ep in range(5):
+        env = GridWorld()
+        env.reset(seed=ep)
+        for _ in range(env.cfg.max_steps + 10):
+            action = Action(int(rng.integers(0, 4)))
+            _, _, terminated, truncated, _ = env.step(action)
+            if terminated and truncated:
+                return Violation(
+                    invariant_id="I8",
+                    message="terminated AND truncated simultanément",
+                    severity=Severity.HARD,
+                    counter_example={"episode": ep},
+                )
+            if terminated or truncated:
+                break
+    return None
