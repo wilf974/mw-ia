@@ -1,0 +1,7 @@
+# MW_IA V1 — dépendances Python.
+# torch + torchvision sont installés séparément avec l'index CUDA (voir README).
+numpy>=1.26
+PyQt6>=6.7
+pyqtgraph>=0.13
+gymnasium>=0.29
+pytest>=8.0
