@@ -21,3 +21,42 @@ class Violation:
     message: str
     severity: Severity
     counter_example: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class VariantSpec:
+    """Configuration d'un variant d'agent RL à valider contre les invariants.
+
+    Alignement V1 : noms cohérents avec mw_ia.config.DQNConfig
+    (replay_capacity, target_sync_steps).
+    """
+
+    gamma: float
+    lr: float
+    epsilon_start: float
+    epsilon_end: float
+    epsilon_decay_steps: int
+    batch_size: int
+    replay_capacity: int
+    target_sync_steps: int
+    reward_min: Optional[float] = None
+    reward_max: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        # Validation structurelle : type / bornes physiques, hors invariants formels.
+        if not isinstance(self.gamma, (int, float)):
+            raise TypeError(f"gamma doit être float, reçu {type(self.gamma).__name__}")
+        if self.lr <= 0:
+            raise ValueError(f"lr doit être > 0, reçu {self.lr}")
+        if not (0.0 <= self.epsilon_start <= 1.0):
+            raise ValueError(f"epsilon_start doit être dans [0,1], reçu {self.epsilon_start}")
+        if not (0.0 <= self.epsilon_end <= 1.0):
+            raise ValueError(f"epsilon_end doit être dans [0,1], reçu {self.epsilon_end}")
+        if self.epsilon_decay_steps <= 0:
+            raise ValueError(f"epsilon_decay_steps doit être > 0, reçu {self.epsilon_decay_steps}")
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size doit être > 0, reçu {self.batch_size}")
+        if self.replay_capacity <= 0:
+            raise ValueError(f"replay_capacity doit être > 0, reçu {self.replay_capacity}")
+        if self.target_sync_steps <= 0:
+            raise ValueError(f"target_sync_steps doit être > 0, reçu {self.target_sync_steps}")
