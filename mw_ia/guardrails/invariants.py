@@ -87,3 +87,33 @@ def bellman_contraction(spec: VariantSpec) -> Optional[Violation]:
                 },
             )
     return None
+
+
+def _huber(y: float, y_hat: float, delta: float = 1.0) -> float:
+    """Huber loss (référence pédagogique, indépendante de torch)."""
+    diff = y - y_hat
+    abs_diff = abs(diff)
+    if abs_diff <= delta:
+        return 0.5 * diff * diff
+    return delta * (abs_diff - 0.5 * delta)
+
+
+@invariant("I3", applies_to=[])
+def huber_nonneg(spec: VariantSpec) -> Optional[Violation]:
+    """∀ y, ŷ : Huber(y, ŷ) ≥ 0.
+
+    Vérifié empiriquement sur 100 paires (y, ŷ) uniformément échantillonnées.
+    """
+    rng = np.random.default_rng(seed=42)
+    for _ in range(100):
+        y = float(rng.uniform(-100.0, 100.0))
+        y_hat = float(rng.uniform(-100.0, 100.0))
+        loss = _huber(y, y_hat)
+        if loss < 0:
+            return Violation(
+                invariant_id="I3",
+                message=f"Huber loss négatif : {loss} pour y={y}, y_hat={y_hat}",
+                severity=Severity.HARD,
+                counter_example={"y": y, "y_hat": y_hat, "loss": loss},
+            )
+    return None

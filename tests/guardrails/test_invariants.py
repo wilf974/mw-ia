@@ -49,3 +49,9 @@ def test_i2_violates_when_gamma_too_close_to_one():
     assert v.invariant_id == "I2"
     assert v.severity == Severity.HARD
     assert v.counter_example is not None
+
+
+# --- I3 -----------------------------------------------------------------------
+def test_i3_huber_nonneg_passes():
+    inv = _REGISTRY["I3"]
+    assert inv.check(_spec()) is None
