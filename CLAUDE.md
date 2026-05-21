@@ -4,169 +4,190 @@
 
 ---
 
-## Règles de comportement (héritées de C:\Windows\System32\CLAUDE.md)
+## Règles de comportement (héritées de `C:\Windows\System32\CLAUDE.md`)
 
 - Toujours répondre en **français**
 - Toujours invoquer les skills **superpowers** (brainstorming, writing-plans, TDD, etc.) et **frontend-design** quand pertinent
-- Utiliser le MCP **context7** pour toute documentation de librairie (PyTorch, PyQt6, PyQtGraph, Gymnasium...)
-- Le MCP **aether** est désormais disponible (installé au user scope) — outil de dev, **PAS** une dépendance de MW_IA
+- Utiliser le MCP **context7** pour toute documentation de librairie (PyTorch, PyQt6, PyQtGraph, Gymnasium…)
+- Le MCP **aether** est disponible et **doit être utilisé activement** pour vérifier les invariants RL critiques (Bellman, seuils de niveau, conditions de convergence). Cf. `~/.claude/projects/.../memory/feedback_aether_usage.md`. **PAS** une dépendance Python de MW_IA.
 - Utiliser **TaskCreate/TaskUpdate** pour piloter les tâches multi-étapes
 - Quand pertinent, dispatcher des **agents parallèles** (subagent_type=Explore, general-purpose, etc.)
 
-## État au moment du handoff (2026-05-21)
+---
 
-Phase atteinte : **brainstorming terminé + design doc validé**. Reste à faire :
-1. Invoquer la skill `superpowers:writing-plans` pour générer le plan d'implémentation détaillé
-2. Implémenter la V1 monolithique complète (voir checklist plus bas)
-3. Lancer un premier entraînement Q-Learning sur GridWorld pour valider la chaîne
+## État au handoff (2026-05-21 → reprise V2)
 
-**Le design doc à lire absolument** : [`docs/superpowers/specs/2026-05-21-mw-ia-rl-design.md`](docs/superpowers/specs/2026-05-21-mw-ia-rl-design.md)
+**V1 monolithique livrée et taguée `v0.1.0`.** 26 tâches du plan exécutées en TDD strict via subagent-driven-development. 52 tests pytest verts, DQN converge à **99 % winrate niveau Expert sur RTX 3060** en 200 ép. / 18.8 s.
 
-## Objectif du projet (résumé)
+### Ce qui marche déjà
+- **GridWorld 10×10** avec obstacles, reward shaping, terminaison/truncation correctes
+- **3 agents tabulaires** : Value Iteration, Policy Iteration, Q-Learning (TD)
+- **DQN complet** : QNetwork MLP, ReplayBuffer circulaire, DQNTrainer (Huber + Adam + AMP + grad clip), DQNAgent (ε-greedy + target sync)
+- **MetricsTracker** : winrate glissant, niveau IA (Débutant/Inter/Avancé/Expert)
+- **TabularRunner + DQNRunner** callback-friendly (zéro couplage Qt)
+- **GUI PyQt6 + PyQtGraph** : grille animée + 4 courbes live + KPIs + 5 boutons + log coloré, threading via QThread + signaux Qt
+- **CLI headless** : `scripts/train_tabular.py`, `scripts/train_dqn.py`, `scripts/launch_gui.py`
+- **Persistance** : checkpoints `.pt` (DQN) et `.npz` (tabulaire) + métriques JSON
+- **Vérification formelle Aether** : invariants `bellman_update` et `level_of` (44 checks passed)
 
-Construire de zéro une IA RL **pédagogique et évolutive** :
-- Théorie : MDP, V(s), Q(s,a), Bellman, Value Iteration, Policy Iteration, Q-Learning, DQN
-- Stack : Python 3.13 + PyTorch CUDA 12.1 + PyQt6 + PyQtGraph + NumPy + Gymnasium
-- GPU cible : **NVIDIA GeForce RTX 3060** (Ampere, ~12 Go VRAM)
-- GUI moderne temps réel : grille animée + 4 courbes (reward/loss/epsilon/winrate) + stats + niveau Débutant→Expert + boutons Start/Pause/Reset/Save/Load + log
-- Évolution future préparée : Double DQN, Dueling, Prioritized ER, LSTM, chatbot RL avec mémoire, LLM local
-
-## Décisions verrouillées
-
-| # | Décision | Détail |
-|---|---|---|
-| 1 | **Architecture Option A** | Modulaire en couches (envs/agents/neural/training/gui/persistence) — voir design doc §4 |
-| 2 | **GUI = PyQt6 + PyQtGraph** | Rendu OpenGL, 60+ FPS, courbes fluides temps réel |
-| 3 | **Phasage = V1 monolithique complet** | Tout livré d'un coup : tabulaire + DQN + GUI + tests |
-| 4 | **Threading = QThread + signaux Qt** | Pas de polling, pas de freeze UI |
-| 5 | **Mixed precision (AMP) activée** sur DQN | `torch.amp` côté CUDA |
-| 6 | **Batch DQN = 128, lr Adam = 1e-3, Huber Loss** | Defaults configurables dans `mw_ia/config.py` |
-| 7 | **GridWorld 10×10** par défaut | Visualisable + tractable tabulairement |
-| 8 | **Aether MCP = outil dev externe** | N'est PAS embarqué dans MW_IA, pas de dépendance |
-| 9 | **Installation** | Le user veut : créer venv + installer torch CUDA + lancer un premier entraînement de validation |
-| 10 | **Niveau IA** | Calculé sur winrate glissant 100 ép. — seuils 30/60/85% |
-
-## Environnement machine
-
-- **OS :** Windows 11 Pro 10.0.26200
-- **Shell Claude Code :** bash (syntaxe Unix dans Bash tool, pas PowerShell)
-- **Python :** 3.13.12 — `py` (alias) ou `C:\Python313\python.exe`
-- **GPU :** NVIDIA GeForce RTX 3060
-- **claude CLI :** v2.1.146
-- **Pour PowerShell depuis bash :** `powershell.exe -NonInteractive -Command "..."`
-
-## MCPs disponibles (vérifiés au handoff)
-
-```
-aether                          ✓ Connected (user scope) — Aether language, 14 tools
-plugin:context7:context7        ✓ Connected — docs librairies
-plugin:playwright:playwright    ✓ Connected — automation browser
-claude.ai Google Drive/Cal/Gmail — auth requise si besoin
+### Ce qui reste à valider visuellement (côté user)
+Cocher les 5 cases de `logs/manual_validation.md` :
+```bash
+source .venv/Scripts/activate && python scripts/launch_gui.py
 ```
 
-Aether MCP path : `C:\Users\Wilfred\Tools\aether\aether_mcp.py`
+### Ce qui n'est PAS dans la V1 (hors-scope volontaire — voir design doc §9)
+Double DQN · Dueling · Prioritized Experience Replay · LSTM / mémoire · Chatbot RL · LLM local backbone · Apprentissage continu cross-session.
 
-## Checklist V1 (ordre suggéré d'implémentation)
+---
 
-> Cette liste sera reprise par `writing-plans` pour devenir un vrai plan détaillé.
-> **Important :** invoquer `superpowers:writing-plans` AVANT de toucher au code.
+## Objectif long-terme
 
-### Étape 0 — Plan
-- [ ] Invoquer `superpowers:writing-plans` avec le design doc comme input
+**IA auto-améliorante** qui propose et teste ses propres modifications d'hyperparamètres / d'architecture, sous contraintes vérifiables formellement via Aether. Décliné en V2+ :
 
-### Étape 1 — Scaffolding
-- [ ] Créer venv : `py -m venv .venv` puis activer
-- [ ] Écrire `requirements.txt` (torch cu121, pyqt6, pyqtgraph, numpy, gymnasium, pytest)
-- [ ] `pip install -r requirements.txt` (≈3 Go DL pour torch CUDA, prévoir ~5-10 min)
-- [ ] Écrire `check_gpu.py` et l'exécuter → doit afficher "RTX 3060 + CUDA OK"
-- [ ] Créer arborescence `mw_ia/` (envs/agents/neural/training/gui/persistence) avec `__init__.py`
-- [ ] Écrire `mw_ia/config.py` (dataclass des hyperparamètres)
-- [ ] `.gitignore` : `.venv/`, `checkpoints/`, `logs/`, `__pycache__/`, `*.pt`
+1. **Mémoire persistante cross-session** (RVF ou équivalent) — pas d'oubli catastrophique
+2. **Évaluateur de politique self-supervisé** — l'agent juge ses trajectoires
+3. **Système de proposition/test d'updates** — variants d'architecture, hyperparams, reward shaping
+4. **Contrat formel d'invariants** (Aether) — l'auto-modification ne viole jamais : (a) bornes du winrate, (b) positivité de la loss, (c) contraction γ-lipschitz de Bellman, (d) tout invariant spécifique au domaine
+5. **Continual learning** (EWC, replay rehearsal) — apprendre de nouvelles tâches sans oublier les anciennes
 
-### Étape 2 — Environment
-- [ ] `mw_ia/envs/gridworld.py` : GridWorld 10×10, obstacles configurables, reward shaping, API `reset()` / `step(action)` style Gymnasium
-- [ ] `tests/test_gridworld.py` : reset déterministe, step retourne tuple correct, terminal sur goal
+La V1 modulaire est l'infrastructure de départ. **Aucune refonte requise pour la V2.**
 
-### Étape 3 — Agents tabulaires
-- [ ] `mw_ia/agents/base.py` : interface `Agent` (act, learn, save, load)
-- [ ] `mw_ia/agents/value_iteration.py` : converge sur GridWorld connu
-- [ ] `mw_ia/agents/policy_iteration.py`
-- [ ] `mw_ia/agents/q_learning.py` : Q-table, ε-greedy, decay
-- [ ] `tests/test_q_learning.py` : converge en <1000 ép. sur GridWorld 5×5
+---
 
-### Étape 4 — DQN neural
-- [ ] `mw_ia/neural/network.py` : QNetwork PyTorch (FC + ReLU, archi configurable nb couches/tailles)
-- [ ] `mw_ia/neural/replay_buffer.py` : buffer circulaire, sample uniforme
-- [ ] `mw_ia/neural/trainer.py` : backprop, Huber Loss, Adam, AMP `torch.amp.autocast`
-- [ ] `mw_ia/agents/dqn.py` : orchestrateur (ε-greedy, target network sync, train step)
-- [ ] `mw_ia/persistence/checkpoint.py` : save/load `.pt` + métriques JSON
-- [ ] `tests/test_dqn_smoke.py` : 100 steps sans crash, save/load round-trip
+## Environnement machine (vérifié 2026-05-21)
 
-### Étape 5 — Training pipeline
-- [ ] `mw_ia/training/metrics.py` : MetricsTracker (winrate glissant, moyenne, best, FPS)
-- [ ] `mw_ia/training/runner.py` : boucle d'entraînement compatible QThread (émet signaux)
-- [ ] `scripts/train_tabular.py` : CLI headless Q-Learning
-- [ ] `scripts/train_dqn.py` : CLI headless DQN (avec `--episodes`, `--device`)
+- **OS** : Windows 11 Pro 10.0.26200
+- **Shell Claude Code** : Git Bash (Unix-style dans `Bash` tool). PowerShell via `powershell.exe -NonInteractive -Command "..."`.
+- **Python** : 3.13.12 — `py` alias ou `C:\Python313\python.exe`
+- **GPU** : NVIDIA GeForce RTX 3060 (12 Go VRAM, Ampere CC 8.6)
+- **Driver NVIDIA** : 591.86 / CUDA 13.1
+- **PyTorch** : `2.11.0+cu128` (⚠️ wheels `cu121` n'existent plus pour Python 3.13 — utiliser `cu128`)
+- **claude CLI** : v2.1.146
 
-### Étape 6 — GUI PyQt6
-- [ ] `mw_ia/gui/theme.py` : palette dark moderne
-- [ ] `mw_ia/gui/widgets/gridworld_view.py` : QGraphicsScene animée (agent, obstacles, goal, trail optionnel)
-- [ ] `mw_ia/gui/widgets/live_plots.py` : 4 plots PyQtGraph (reward, loss, epsilon, winrate)
-- [ ] `mw_ia/gui/widgets/stats_panel.py` : KPIs + label niveau (Débutant→Expert)
-- [ ] `mw_ia/gui/widgets/control_panel.py` : 5 boutons (Start/Pause/Reset/Save/Load)
-- [ ] `mw_ia/gui/widgets/log_console.py` : QPlainTextEdit append-only
-- [ ] `mw_ia/gui/app.py` : MainWindow, layout, connexion signaux/slots, TrainingThread
-- [ ] `scripts/launch_gui.py` : entrypoint
-
-### Étape 7 — Documentation
-- [ ] `README.md` : présentation, install, théorie (formules Bellman + Q-Learning), screenshots, roadmap
-- [ ] Commenter le code en français, surtout les passages pédagogiques
-
-### Étape 8 — Validation finale
-- [ ] `pytest tests/` → tout vert
-- [ ] `py scripts/train_tabular.py` → converge GridWorld 10×10 en <1 min
-- [ ] `py scripts/train_dqn.py --episodes 200` → loss décroît, pas de NaN
-- [ ] `py scripts/launch_gui.py` → fenêtre s'ouvre, entraînement live visible, boutons fonctionnels
-
-## Tâches en cours (TaskList au moment du handoff)
-
-```
-#1. [completed] Présenter architecture proposée + obtenir approbation
-#2. [completed] Écrire et committer le design doc
-#3. [pending]   Invoquer writing-plans pour le plan d'implémentation   ← REPRENDRE ICI
-#4. [pending]   Implémenter V1 monolithique complète
-#5. [completed] Installer le MCP Aether dans Claude Code
+### Activer le venv (réflexe à chaque commande)
+```bash
+source .venv/Scripts/activate
 ```
 
-## Instructions précises pour la prochaine session
-
-1. **Lis ce CLAUDE.md en entier**
-2. **Lis le design doc** `docs/superpowers/specs/2026-05-21-mw-ia-rl-design.md`
-3. Vérifie l'état des tâches via `TaskList` (si elles persistent) ou recrée-les depuis la checklist ci-dessus
-4. Invoque la skill `superpowers:writing-plans` avec le design doc comme spec d'entrée
-5. Présente le plan d'implémentation au user, attends son feu vert
-6. Exécute le plan en suivant la checklist Étape 1 → 8
-7. Quand `pip install torch` est lancé, prévoir un timeout généreux (5-10 min, ~3 Go)
-8. Avant de claim "fait", lance vraiment `py check_gpu.py` puis `py scripts/launch_gui.py` pour vérifier visuellement
-9. Si CUDA n'est pas dispo sur cette install Python, dire le user et proposer fallback CPU explicite
-
-## Théorie à inclure dans le README (rappel)
-
-```
-Équation de Bellman (optimalité) :
-  V*(s) = max_a Σ_s' P(s'|s,a) [R(s,a,s') + γ V*(s')]
-
-Mise à jour Q-Learning :
-  Q(s,a) ← Q(s,a) + α [r + γ max_a' Q(s',a') - Q(s,a)]
-
-DQN :
-  L(θ) = E[(r + γ max_a' Q(s',a'; θ⁻) - Q(s,a; θ))²]  (Huber au lieu de carré en pratique)
+### Réinstaller PyTorch depuis zéro si besoin
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
-## Garde-fous
+---
 
-- ❌ Ne PAS modifier `C:\Windows\System32\CLAUDE.md`
-- ❌ Ne PAS ajouter Aether comme dépendance Python dans `requirements.txt`
-- ❌ Ne PAS implémenter Double DQN / Dueling / PER / LSTM dans la V1 (hors-scope)
-- ✅ Le design doc est la **source de vérité** pour l'archi. Pour s'en écarter : reposer la question au user.
-- ✅ Si une lib pose problème (PyQt6 install, torch CUDA), utiliser `context7` AVANT de proposer un workaround
+## Repo git
+
+- **Repo dédié MW_IA** initialisé le 2026-05-21 dans `C:\Users\Wilfred\Documents\IA Inst\MW_IA\.git`.
+- ⚠️ **Ne PAS confondre** avec le repo parent `C:/Users/Wilfred/.git` (branche `feature/pentest-agent`) qui appartient au projet **PenTest**. Ils sont indépendants.
+- Branche : `main`. Tag : `v0.1.0`. 28 commits propres au handoff.
+
+---
+
+## Arborescence finale V1
+
+```
+MW_IA/
+├── CLAUDE.md                           # ce fichier
+├── README.md                           # théorie + install + archi + roadmap
+├── requirements.txt                    # numpy, PyQt6, pyqtgraph, gymnasium, pytest
+├── pyproject.toml                      # setuptools + pytest config
+├── check_gpu.py                        # diagnostic CUDA / VRAM
+├── scripts/
+│   ├── train_tabular.py                # CLI Q-Learning headless
+│   ├── train_dqn.py                    # CLI DQN headless (--device cuda)
+│   └── launch_gui.py                   # entrypoint GUI
+├── mw_ia/
+│   ├── config.py                       # GridWorldConfig / QLearningConfig / DQNConfig / TrainingConfig
+│   ├── envs/gridworld.py               # GridWorld + Action enum
+│   ├── agents/                         # base.py, value_iteration.py, policy_iteration.py, q_learning.py, dqn.py
+│   ├── neural/                         # network.py, replay_buffer.py, trainer.py
+│   ├── training/                       # metrics.py (Level + MetricsTracker), runner.py (Tabular + DQN)
+│   ├── persistence/checkpoint.py       # JSON metrics dump/load
+│   └── gui/
+│       ├── theme.py                    # Theme + QSS
+│       ├── widgets/                    # gridworld_view, live_plots, stats_panel, control_panel, log_console
+│       └── app.py                      # MainWindow + TrainingThread
+├── tests/                              # 13 fichiers, 52 tests
+├── checkpoints/                        # .pt / .npz (gitignored)
+├── logs/                               # metrics .json + manual_validation.md (gitignored sauf -f)
+└── docs/superpowers/
+    ├── specs/2026-05-21-mw-ia-rl-design.md
+    └── plans/2026-05-21-mw-ia-v1.md
+```
+
+---
+
+## Procédures usuelles
+
+### Lancer les tests
+```bash
+source .venv/Scripts/activate && pytest -q
+```
+Attendu : 52 passed.
+
+### Entraîner Q-Learning tabulaire (headless)
+```bash
+source .venv/Scripts/activate && python scripts/train_tabular.py --episodes 1000
+```
+Résultat de référence : winrate 100 % niveau Expert en ~2 s.
+
+### Entraîner DQN sur GPU (headless)
+```bash
+source .venv/Scripts/activate && python scripts/train_dqn.py --episodes 200 --device cuda
+```
+Résultat de référence : winrate 99 % niveau Expert en ~19 s sur RTX 3060.
+
+### Lancer la GUI live
+```bash
+source .venv/Scripts/activate && python scripts/launch_gui.py
+```
+
+---
+
+## Garde-fous & pièges à connaître
+
+1. **Hook `security_reminder_hook.py`** flagge naïvement la séquence `exec` suivie d'une parenthèse ouvrante comme une vuln Node.js `child_process` — y compris la méthode `QApplication.exec` de PyQt6. **Contournement** : `getattr(app, "exec")()` ou `run_loop = app.exec; run_loop()`. Le launcher utilise déjà cette astuce.
+
+2. **PyTorch cu121 obsolète pour Python 3.13.** Toujours installer via `--index-url https://download.pytorch.org/whl/cu128`. Si même `cu128` ne marche plus dans le futur, essayer `cu126`, `cu124`, puis fallback CPU explicite.
+
+3. **`.claude/` doit rester gitignoré** (présent dans `.gitignore`) — sinon les artefacts de session Claude Code se retrouveraient committés.
+
+4. **Pas de Double DQN / Dueling / PER / LSTM dans la V1.** Ces évolutions sont réservées à la V2. Toute proposition d'inclusion en V1 = re-poser la question à l'utilisateur.
+
+5. **`mw_ia/envs/gridworld.py`** : le `step_count` s'incrémente **même quand le mouvement est bloqué** (mur ou obstacle). C'est intentionnel — sinon truncation par `max_steps` deviendrait contournable. Documenté dans le commit `149b4d0`.
+
+6. **Aether MCP doit être mobilisé activement** quand pertinent (RL convergence, contraintes math, contrats numériques). Lancer `mcp__aether__syntax_guide` d'abord pour rafraîchir la syntaxe Lisp typée.
+
+---
+
+## Mémoires persistantes liées
+
+À consulter au démarrage :
+- `~/.claude/projects/C--Users-Wilfred/memory/projet_mw_ia.md` — état du projet
+- `~/.claude/projects/C--Users-Wilfred/memory/feedback_aether_usage.md` — usage Aether
+- `~/.claude/projects/C--Users-Wilfred/memory/MEMORY.md` — index global
+
+---
+
+## Instructions pour la prochaine session
+
+### Si l'objectif est de valider la GUI
+```bash
+source .venv/Scripts/activate && python scripts/launch_gui.py
+```
+Puis cocher les cases dans `logs/manual_validation.md`.
+
+### Si l'objectif est de démarrer la V2 "auto-amélioration"
+1. Lire ce CLAUDE.md en entier
+2. Lire `~/.claude/projects/C--Users-Wilfred/memory/projet_mw_ia.md`
+3. Invoquer la skill `superpowers:brainstorming` avec le prompt :
+   > "MW_IA V2 — IA auto-améliorante. Sur la V1 modulaire actuelle (DQN + GUI), ajouter : mémoire persistante cross-session, évaluateur self-supervisé de politique, système de proposition/test d'updates, contrat formel d'invariants Aether, continual learning sans oubli catastrophique."
+4. Produire un design doc V2 dans `docs/superpowers/specs/`
+5. Puis `superpowers:writing-plans` puis subagent-driven-development comme pour la V1
+
+### Si l'objectif est un quick fix / petite feature V1
+- Suivre TDD (test rouge → impl → vert → commit)
+- Ne pas casser le tag `v0.1.0` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit
