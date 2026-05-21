@@ -81,3 +81,24 @@ def test_i6_replay_capacity_passes():
     inv = _REGISTRY["I6"]
     # Petit replay_capacity pour test rapide (override le default 100_000)
     assert inv.check(_spec(replay_capacity=10)) is None
+
+
+# --- I7 -----------------------------------------------------------------------
+def test_i7_pass_with_valid_bounds():
+    inv = _REGISTRY["I7"]
+    assert inv.check(_spec(reward_min=-1.0, reward_max=1.0)) is None
+
+
+def test_i7_violates_when_min_greater_than_max():
+    inv = _REGISTRY["I7"]
+    v = inv.check(_spec(reward_min=1.0, reward_max=-1.0))
+    assert v is not None
+    assert v.invariant_id == "I7"
+
+
+def test_i7_not_applicable_when_bounds_none():
+    """Si reward_min/max sont None, I7 ne devrait pas être listé applicable."""
+    from mw_ia.guardrails.registry import applicable_invariants
+    spec = _spec()  # reward_min/max = None par défaut
+    ids = [inv.id for inv in applicable_invariants(spec)]
+    assert "I7" not in ids

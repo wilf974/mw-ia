@@ -151,6 +151,20 @@ def replay_buffer_capacity(spec: VariantSpec) -> Optional[Violation]:
     return None
 
 
+@invariant("I7", applies_to=["reward_min", "reward_max"])
+def reward_bounded(spec: VariantSpec) -> Optional[Violation]:
+    """reward_min ≤ reward_max (cohérence interne des bornes annoncées)."""
+    assert spec.reward_min is not None and spec.reward_max is not None  # garanti par applies_to
+    if spec.reward_min > spec.reward_max:
+        return Violation(
+            invariant_id="I7",
+            message=f"reward_min={spec.reward_min} > reward_max={spec.reward_max}",
+            severity=Severity.HARD,
+            counter_example={"reward_min": spec.reward_min, "reward_max": spec.reward_max},
+        )
+    return None
+
+
 def _compute_epsilon(t: int, eps_start: float, eps_end: float, decay_steps: int) -> float:
     """Schedule linéaire de ε(t) — référence pour I5.
 
