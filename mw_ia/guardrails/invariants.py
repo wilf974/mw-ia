@@ -7,8 +7,14 @@ from __future__ import annotations
 
 from typing import Optional
 
+import numpy as np
+
+from mw_ia.config import TrainingConfig
+from mw_ia.envs.gridworld import Action, GridWorld
 from mw_ia.guardrails.contracts import Severity, VariantSpec, Violation
 from mw_ia.guardrails.registry import invariant
+from mw_ia.neural.replay_buffer import ReplayBuffer
+from mw_ia.training.metrics import MetricsTracker
 
 
 @invariant("I1", applies_to=["gamma"])
@@ -21,9 +27,6 @@ def gamma_in_open_unit(spec: VariantSpec) -> Optional[Violation]:
             severity=Severity.HARD,
         )
     return None
-
-
-import numpy as np
 
 
 def _bellman_operator(Q: np.ndarray, P: np.ndarray, R: np.ndarray, gamma: float) -> np.ndarray:
@@ -89,10 +92,6 @@ def bellman_contraction(spec: VariantSpec) -> Optional[Violation]:
     return None
 
 
-from mw_ia.config import TrainingConfig
-from mw_ia.training.metrics import MetricsTracker
-
-
 @invariant("I4", applies_to=[])
 def winrate_bounds(spec: VariantSpec) -> Optional[Violation]:
     """winrate ∈ [0, 1] sur fenêtre glissante.
@@ -114,9 +113,6 @@ def winrate_bounds(spec: VariantSpec) -> Optional[Violation]:
                 counter_example={"winrate": wr},
             )
     return None
-
-
-from mw_ia.neural.replay_buffer import ReplayBuffer
 
 
 @invariant("I6", applies_to=["replay_capacity"])
@@ -141,12 +137,12 @@ def replay_buffer_capacity(spec: VariantSpec) -> Optional[Violation]:
                 severity=Severity.HARD,
                 counter_example={"size": len(buf), "capacity": capacity},
             )
-        if buf._idx >= capacity:
+        if buf.current_index >= capacity:
             return Violation(
                 invariant_id="I6",
-                message=f"buffer._idx={buf._idx} >= capacity={capacity}",
+                message=f"buffer.current_index={buf.current_index} >= capacity={capacity}",
                 severity=Severity.HARD,
-                counter_example={"idx": int(buf._idx), "capacity": capacity},
+                counter_example={"idx": int(buf.current_index), "capacity": capacity},
             )
     return None
 
@@ -229,9 +225,6 @@ def huber_nonneg(spec: VariantSpec) -> Optional[Violation]:
                 counter_example={"y": y, "y_hat": y_hat, "loss": loss},
             )
     return None
-
-
-from mw_ia.envs.gridworld import Action, GridWorld
 
 
 @invariant("I8", applies_to=[])
