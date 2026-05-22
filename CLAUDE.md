@@ -485,11 +485,60 @@ C'est un signal très fort pour **best-checkpoint tracking + early stopping**.
 
 ### Candidats de remédiation (par ordre de ROI scientifique)
 
-1. **Test ep=3000** sur V2-W seeds 0-4 : si les seeds qui collapsent à ep 5000 sont meilleurs à ep 3000, le bottleneck est "on entraîne trop". Test crucial avant tout autre changement. ~50 min GPU.
-2. **Best-checkpoint tracking** : sauvegarder le model au pic de winrate (sur fenêtre rolling), pas au dernier épisode. Si validé par ep=3000 test, c'est le meilleur ROI pour récupérer le finding pratique.
-3. **Soft target update (Polyak τ=0.005)** au lieu de hard sync 1000 steps : prévient target/online drift. ~10 LOC modif trainer.
-4. **Learning rate plus bas** (1e-4 au lieu de 1e-3) : stabilité long-terme.
-5. **Epsilon floor plus haut** (0.10 au lieu de 0.05) : exploration safety net permanent.
+1. ✅ **Test ep=3000** sur V2-W seeds 0-4 : **EFFECTUÉ 2026-05-23, H1 CONFIRMÉE** (cf. section suivante).
+2. **Best-checkpoint tracking + eval greedy + early stopping** : devient le **prochain sous-projet V2-V**, prioritaire absolu suite à H1.
+3. Soft target update (Polyak τ=0.005), learning rate plus bas (1e-4), epsilon floor 0.10 : reportés tant que V2-V n'est pas livré.
+
+### V2-W — H1 confirmée : best-before-collapse (2026-05-23, ep=3000 vs ep=5000)
+
+**Hypothèse H1** :
+> V2-W apprend un bon agent avant 3000-3500 épisodes, puis l'apprentissage off-policy continue et détruit la policy par target drift / replay drift.
+
+**Critère de validation** : si seed 4 @ ep=3000 ≈ 70-80 % @ diff 0.25-0.30, H1 est confirmée.
+
+**Résultat seed 4** : **71 % @ diff=0.30** — **H1 confirmée sans ambiguïté**.
+
+**Comparaison complète par seed (V2-W same-seeds, ep=5000 vs ep=3000)** :
+
+| Seed | V2-W ep=5000 | V2-W ep=3000 | Δ winrate | Δ diff |
+|---|---|---|---|---|
+| 0 | 62 % @ diff=0.40 | **67 % @ diff=0.30** | +5 pp | −0.10 |
+| 1 | 68 % @ diff=0.35 | **72 % @ diff=0.30** | +4 pp | −0.05 |
+| 2 | 81 % @ diff=0.40 | **87 % @ diff=0.30** | +6 pp | −0.10 |
+| **3** | **49 % @ diff=0.15** (crash partiel) | **58 % @ diff=0.30** | **+9 pp** | **+0.15** |
+| **4** | **1 % @ diff=0.10** (collapse total) | **71 % @ diff=0.30** | **+70 pp** | **+0.20** |
+
+**Statistiques agrégées V2-W ep=3000 (n=5)** :
+
+| Métrique | V2-W ep=5000 | **V2-W ep=3000** | Évolution |
+|---|---|---|---|
+| Diff max moyenne | 0.28 | **0.30** (uniforme) | +7 % |
+| Diff max écart-type | ±0.129 | **0.000** | **−100 %** (tous 5 seeds convergent à 0.30) |
+| Bucket 1 winrate moyenne | 44 % | **71 %** | **+27 pp** |
+| Bucket 1 ≥ 70 % strict | 1/5 (20 %) | **3/5 (60 %)** | +40 pp |
+| Seeds réussites (diff ≥ 0.25) | 3/5 | **5/5** | +40 pp |
+| Worst seed | 1 % @ diff=0.10 | **58 % @ diff=0.30** | sauvé de l'effondrement |
+
+**Critère succès V2-W spec à ep=3000** :
+
+1. ✅ **Variance écart-type < ±0.05** : **0.000** — **parfait** (tous seeds convergent à diff=0.30)
+2. ⚠️ **Bucket 1 ≥ 70 % sur ≥ 2/3 seeds** : **3/5 (60 %)** — borderline (2/3 = 66.7 %), 3 seeds dépassent 70 %
+
+**Lecture causale finale (samed-seed seed 4)** :
+
+> Même seed, même init, même env, même hyperparams. **Seule différence** : arrêter à ep 3000 au lieu de ep 5000. Résultat : 1 % @ diff=0.10 → **71 % @ diff=0.30**. **L'entraînement après ep 3000 détruit littéralement l'agent sur seed 4.**
+
+**Le finding récupéré n=3 (variance écrasée) était VRAI mais cherché au mauvais endroit** :
+- À ep=5000, variance V2-W = ±0.129 (cherry-pick n=3 cachait le collapse de certains seeds)
+- À ep=3000, variance V2-W = **0.000** (tous les seeds convergent uniformément à diff=0.30)
+
+Le mean-improvement V2-Z → V2-W reste solide. La "magie" de Double DQN est réelle — elle se révèle quand on stoppe au bon moment.
+
+**Conclusion stratégique** :
+
+> Le pipeline RL "train until end" est **cassé** pour ce setup procédural. Sans best-checkpoint tracking + early stopping, on jette littéralement le meilleur modèle qu'on a entraîné. **Tout benchmark V2-Z/W/futur sera biaisé** tant que ce bottleneck infrastructure n'est pas adressé.
+
+**Sous-projet V2-V (best-checkpoint + eval greedy + early stopping) devient la priorité absolue** — infrastructure transverse pour tous les futurs sous-projets RL du programme V2/V3+.
 
 ---
 
@@ -795,12 +844,34 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 
 **Story scientifique consolidée n=5** : représentation spatiale (V2-Z) + Double DQN (V2-W) doublent le mean diff mais ne résolvent PAS le **bottleneck #3 = stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique**. Le finding pratique : **le meilleur agent V2-W existe avant ep 3500, l'entraînement après le détruit sur certains seeds**.
 
-**Prochaines étapes prioritaires (validation V2-W avant nouveaux sous-projets)** :
+**Prochaines étapes prioritaires (post H1 confirmée 2026-05-23)** :
 
-1. **Test hypothèse ep=3000 sur V2-W seeds 0-4 — RECOMMANDÉ** : capturer le pic V2-W avant collapse. Si seeds 3/4 ep=3000 sont meilleurs que ep=5000, le bottleneck est confirmé "on entraîne trop longtemps". ~50 min GPU.
-2. **Best-checkpoint tracking** : si test #1 validé, implémenter early-stopping ou save-best-model par fenêtre rolling de winrate. Permet de récupérer le pic agent sans risquer le collapse. ~30-50 LOC modif `ConvProceduralDQNRunner` + checkpoint logic.
-3. **Soft target update (Polyak τ=0.005)** : remplacer hard sync 1000 steps par soft update à chaque step. Hypothèse : prévient le target/online drift qui cause le collapse. ~10 LOC modif `_ConvDQNTrainer`.
-4. **V2-ZY CNN+LSTM+Double DQN** : reportable tant que le bottleneck #3 n'est pas adressé. Ajouter la mémoire récurrente sur un agent qui collapse à ep 4000 ne résoudra rien.
+1. ✅ **Test ep=3000 V2-W seeds 0-4** — **EFFECTUÉ, H1 CONFIRMÉE** : tous les 5 seeds convergent à diff=0.30 avec std=0.000, bucket 1 moyen 71 %, seed 4 sauvé (1 % → 71 %). Cf. section "V2-W — H1 confirmée : best-before-collapse" pour les détails.
+
+2. **V2-V — Training Protocol Stabilization (PRIORITÉ ABSOLUE)** : sous-projet à part entière, pas une feature.
+
+   Le finding H1 démontre que le pipeline "train until end" est cassé pour ce setup. Sans V2-V, **tous les futurs benchmarks RL sont biaisés** par le timing arbitraire d'arrêt.
+
+   Périmètre proposé V2-V :
+   - **Eval périodique greedy** (ex. toutes les 100 ép, 10 rollouts greedy sur seeds eval séparés)
+   - **Best-checkpoint tracking** (sauvegarde du modèle au pic d'eval winrate)
+   - **Early stopping** (arrêt si pas d'amélioration eval sur N éval consécutives)
+   - **Moving average metrics** (lissage pour décision stable)
+   - **Rollback automatique** (restaurer best-model si collapse détecté)
+   - **Validation seeds** (séparation env stricte training vs eval — pas le même `seed=ep`)
+   - **Training/eval separation stricte** (eval ne pollue ni le buffer ni le scheduler)
+
+   Pattern de livraison : brainstorm + spec + plan + impl TDD (cycle complet superpowers).
+
+3. **Reporté tant que V2-V non livré** :
+   - Soft target update (Polyak τ=0.005)
+   - Learning rate plus bas
+   - V2-ZY CNN+LSTM+Double DQN
+   - Mazes plus larges
+
+   Raison : tester ces leviers sans best-checkpoint = mesurer des artefacts de timing au lieu de mesurer l'effet vrai.
+
+4. **Re-baseline V2-Z et V2-W après V2-V** : une fois V2-V livré, refaire le benchmark same-seed n=5 V2-Z/W avec eval périodique + best-checkpoint. Les findings consolidés deviendront publishable-grade.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
