@@ -281,6 +281,53 @@ pour préserver l'info spatiale sur 10×10. ~1.66M params.
 
 Bouton "Démarrer (procedural CNN)" disponible dans `python scripts/launch_gui.py`.
 
+## V2-W — Double DQN sur ConvDQN (sous-projet livré)
+
+**Tag** : `v0.2.0-w` — **Tests** : 211 verts (208 baseline + 3 V2-W)
+
+Motivation : V2-Z (CNN seul) franchit le plafond V2-X/V2-Y (atteint diff=0.25-0.35
+sur 2/3 seeds) mais avec **variance inter-seeds élevée** (écart-type ±0.13).
+Symptôme classique de **surestimation Q-values DQN** (Hasselt 2015) + sensibilité
+aux conditions initiales.
+
+V2-W ajoute Double DQN : on découple la sélection d'action (online net) et son
+évaluation (target net) pour stabiliser l'apprentissage.
+
+### Usage CLI
+
+```bash
+# V2-W par défaut (Double DQN activé)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+
+# Reproduire la baseline V2-Z (DQN classique)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda --no-double-dqn
+```
+
+### Diff algorithmique (~10 LOC dans `_ConvDQNTrainer.step()`)
+
+Avant (V2-Z DQN classique) :
+```python
+q_next = self.target(next_states).max(dim=1).values
+```
+
+Après (V2-W Double DQN) :
+```python
+next_actions = self.online(next_states).argmax(dim=1)   # sélection : online
+q_next = self.target(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
+```
+
+### Architecture
+
+Aucun nouveau fichier code. Flag `double_dqn: bool = True` dans `ConvDQNConfig`,
+branche conditionnelle dans `_ConvDQNTrainer.step()`, exposition CLI via
+`argparse.BooleanOptionalAction`. Réutilise intégralement l'infrastructure V2-Z
+(ConvQNetwork, ConvDQNAgent, ConvProceduralDQNRunner, ReplayBuffer).
+
+### GUI
+
+Le bouton "Démarrer (procedural CNN)" utilise `ConvDQNConfig()` par défaut, donc
+V2-W (Double DQN) est activé automatiquement. Pas de nouveau bouton.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :

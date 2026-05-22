@@ -35,6 +35,7 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 | **X** | Environnement procédural + curriculum | ✅ Livré (tag `v0.2.0-x`) |
 | **Y** | Deep Recurrent Q-Network (LSTM, roadmap #1) | ✅ Livré (tag `v0.2.0-y`) |
 | **Z** | CNN perception spatiale (roadmap #2) | ✅ Livré (tag `v0.2.0-z`) |
+| **W** | Double DQN sur ConvDQN (roadmap #7) | ✅ Livré (tag `v0.2.0-w`) |
 | **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
@@ -375,6 +376,40 @@ q_next = self.target(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
 3. **Benchmark direct V2-Z vs V2-W** : n=3 seeds pour chaque, mêmes hyperparams, mêmes 5000 ép → table comparative directe
 4. Si V2-W → diff_max ≥ 0.40 stable sur n=3, c'est le finding "publishable" complet : représentation spatiale ET stabilité Q = combo nécessaire
 
+### V2-W — état final des phases (livraison 2026-05-22)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Flag `double_dqn` dans `ConvDQNConfig` | T1 | ✅ | 2 | 1 |
+| 2 — Branche conditionnelle dans `_ConvDQNTrainer.step()` | T2 | ✅ | 1 | 1 |
+| 3 — CLI `--double-dqn / --no-double-dqn` | T3 | ✅ | — | 1 |
+| 4 — README + CLAUDE.md + smoke + tag `v0.2.0-w` | T4 | ✅ | — | 1 + tag |
+
+### Composants V2-W livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| Flag `double_dqn: bool = True` | `mw_ia/config.py` (ConvDQNConfig) | Active la formule Double DQN par défaut. False = V2-Z baseline. |
+| Branche conditionnelle | `mw_ia/agents/conv_dqn.py` (`_ConvDQNTrainer.step()`) | ~10 LOC : if double_dqn, online sélectionne et target évalue. Else V2-Z baseline. |
+| Param trainer | `mw_ia/agents/conv_dqn.py` (`_ConvDQNTrainer.__init__`) | Accepte `double_dqn: bool = True`. ConvDQNAgent passe `cfg.double_dqn`. |
+| CLI flag | `scripts/train_cnn_dqn_procedural.py` | `--double-dqn / --no-double-dqn` (BooleanOptionalAction), default V2-W. |
+| Test branche | `tests/agents/test_conv_dqn.py::test_double_dqn_branch_differs_from_standard` | Vérifie mathématiquement que les 2 formules divergent quand online ≠ target. |
+
+### Décisions techniques V2-W
+
+- **Flag dans ConvDQNConfig** (pas nouveau dataclass) : approche minimale, A/B contrôlé sur même infra, V2-Z reste reproductible avec `--no-double-dqn`.
+- **Default `double_dqn=True`** : V2-W est l'amélioration recommandée. GUI hérite automatiquement (le bouton "procedural CNN" utilise `ConvDQNConfig()` sans args).
+- **Pas de nouveau runner / agent / fichier** : la modification est purement à l'intérieur du trainer. Tout le reste de l'infra V2-Z est réutilisé.
+- **Test unitaire ciblé sur la formule** : `test_double_dqn_branch_differs_from_standard` vérifie la divergence mathématique des 2 formules sur 2 réseaux désynchronisés, pas la convergence empirique. Déterministe, isolé, ~25 LOC.
+- **Validation empirique = benchmark same-seed n=3 V2-Z vs V2-W** : à mener post-impl. Seul vrai test scientifique (mêmes seeds 0/1/2, seule variable changée = formule du Q-target).
+
+### V2-W — pièges connus
+
+1. **AMP autocast sur la branche `argmax(self.online(next_states))`** : le forward double passe sous autocast (no_grad context préservé). argmax sur tensor half-precision = OK PyTorch. Si NaN observé, fallback `self.online(next_states).float().argmax(...)`.
+2. **online == target au step 0** : juste après init, sync_target a déjà été appelé. Les 2 formules donnent exactement les mêmes q_next. C'est attendu et le test ciblé désynchronise volontairement pour vérifier la divergence.
+3. **CLI default V2-W casse silencieusement la repro V2-Z** : documenter explicitement "Pour reproduire la baseline V2-Z, ajouter `--no-double-dqn`". GUI → V2-W automatique (acceptable car recommandation).
+4. **save/load checkpoint avec / sans flag** : `cfg.__dict__` sauvegardé inclut maintenant `double_dqn`. Le `load()` V1-hérité ne re-construit pas cfg → l'utilisateur doit reconstruire l'agent avec le bon `cfg.double_dqn` avant load. À noter mais non-critique en MVP.
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
@@ -662,10 +697,17 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 ### Reprise par défaut — attaquer un nouveau sous-projet
 
-V2-A, V2-X, V2-Y ET V2-Z (CNN) étant terminés ET la baseline V2-Z validée empiriquement 1 run 5000 ép GPU (54 % @ diff=0.10, **premier sous-projet à franchir le plafond V2-X/V2-Y**), la **suite naturelle est V2-W Double DQN sur CNN** :
+V2-A, V2-X, V2-Y, V2-Z (CNN) ET V2-W (Double DQN) étant terminés, **la prochaine étape est la validation empirique V2-W** (benchmark same-seed n=3 V2-Z vs V2-W) puis décision basée sur outcome.
 
 **Diagnostic empirique fin de session 2026-05-22** :
 > V2-Z CNN livré tag `v0.2.0-z` + run 5000 ép GPU consolidé : **franchit diff=0.05 → 0.10** (V2-X et V2-Y plafonnaient à 0.05). Plafond résiduel à diff=0.10 (winrate 44-54 %, scheduler bloqué). Symptôme classique de surestimation Q-values DQN → cible naturelle = Double DQN. Cf. section "V2-Z — baseline CNN empirique 5000 ép" pour les détails.
+
+**Plan validation empirique V2-W (à mener prochaine session)** :
+
+1. Lancer 3 runs GPU 5000 ép avec `--double-dqn --seed 0/1/2` (mêmes seeds que V2-Z baseline déjà mesurée)
+2. Documenter benchmark n=3 V2-Z vs n=3 V2-W dans CLAUDE.md (tableau 6 runs, statistiques, lecture finding)
+3. Si critère atteint (variance < ±0.05 + bucket 1 ≥ 70% sur 2/3 seeds) → finding consolidé "représentation + stabilité Q = combo nécessaire", record dans README synthèse top-niveau
+4. Si critère non-atteint → candidats suivants : V2-ZY (CNN+LSTM combiné) ou hyperparam tuning V2-W (target_sync_steps plus court)
 
 **Prochaines étapes possibles** (priorité à débrainstormer en session fraîche) :
 
@@ -678,19 +720,19 @@ V2-A, V2-X, V2-Y ET V2-Z (CNN) étant terminés ET la baseline V2-Z validée emp
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 208 passed. + `bash aether/verify_all.sh` → 8 OK.
-3. **Aligner avec l'utilisateur** sur le prochain sous-projet OU sur la validation empirique V2-Z.
+   Attendu : 211 passed. + `bash aether/verify_all.sh` → 8 OK.
+3. **Aligner avec l'utilisateur** sur le prochain sous-projet OU sur la validation empirique V2-W.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
    - Écrire la spec dans `docs/superpowers/specs/YYYY-MM-DD-<sub-projet>-design.md`
    - `superpowers:writing-plans` → plan TDD bite-sized
-   - `superpowers:subagent-driven-development` (pattern V1/V2-A/V2-X/V2-Y/V2-Z) : implementer + spec reviewer + code quality reviewer par task ou groupe cohérent.
+   - `superpowers:subagent-driven-development` (pattern V1/V2-A/V2-X/V2-Y/V2-Z/V2-W) : implementer + spec reviewer + code quality reviewer par task ou groupe cohérent.
 
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 208 passed)
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 211 passed)
 - Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`) sans raison documentée
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)
