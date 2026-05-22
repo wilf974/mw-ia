@@ -30,6 +30,11 @@ def main() -> int:
     parser.add_argument("--lstm-hidden", type=int, default=128)
     parser.add_argument("--sequence-length", type=int, default=32)
     parser.add_argument("--epsilon-decay-steps", type=int, default=200_000)
+    parser.add_argument("--scheduler-update-interval", type=int, default=50,
+                        help="Périodicité (ép) du scheduler de difficulté (default V2-Y : 50 ; "
+                             "le DRQN/LSTM oscille catastrophiquement avec update=200 V2-X)")
+    parser.add_argument("--scheduler-step", type=float, default=0.05,
+                        help="Pas de difficulté du scheduler (default V2-Y : 0.05)")
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -51,7 +56,10 @@ def main() -> int:
         sequence_length=args.sequence_length,
         epsilon_decay_steps=args.epsilon_decay_steps,
     )
-    sched_cfg = SchedulerConfig()
+    sched_cfg = SchedulerConfig(
+        update_interval=args.scheduler_update_interval,
+        step=args.scheduler_step,
+    )
     train_cfg = TrainingConfig()
 
     cb = RunnerCallbacks(on_log=_print_log)

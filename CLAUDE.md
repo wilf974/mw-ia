@@ -157,6 +157,23 @@ Suite au fix GUI procedural (commit `1a040c6`), 3 itérations de tuning schedule
 
 **Plafond V2-X consolidé** : le DQN feedforward (même avec `hidden=(256,256)`, `epsilon_decay_steps=200000`, `min_density=0.0`, scheduler `update_interval=200`, `step=0.05`) **plafonne à diff ≈ 0.05** (5 obstacles sur 10×10), pas 0.10 comme initialement perçu. Le palier 0.075 a été atteint en iter 3 mais l'agent décroche immédiatement. Au-delà nécessite changement d'archi : **V2-Y LSTM (livré), Double DQN, CNN, ou Dueling**.
 
+### V2-Y — scheduler antagoniste à V2-X (finding empirique 2026-05-22)
+
+Test du scheduler V2-X consolidé (`update_interval=200`, `step=0.05`) sur V2-Y DRQN 5000 ép : **catastrophe**. L'agent oscille violemment entre diff 0 (winrate 80-96%) et diff 0.05 (winrate 5-22%), finit à **5% @ diff 0.05** (vs V2-Y initial avec update=50 : 95% @ diff 0.05).
+
+**Diagnostic : les hyperparams scheduler dépendent de l'archi de l'agent** :
+- DQN feedforward (V2-X) : apprend lentement mais stable → scheduler patient (`update=200`) = optimal
+- DQN LSTM (V2-Y) : catastrophic forgetting naturel → scheduler patient = chaos amplifié
+
+**Décision design** : `SchedulerConfig()` defaults globaux restent V2-X-optimaux (`update=200`, `step=0.05`). Les CLI scripts exposent les flags `--scheduler-update-interval` et `--scheduler-step` (commits `[hash]`) avec des defaults adaptés par archi :
+- `scripts/train_dqn_procedural.py` (V2-X) : default `--scheduler-update-interval 200` (recette V2-X gagnante)
+- `scripts/train_drqn_procedural.py` (V2-Y) : default `--scheduler-update-interval 50` (LSTM-friendly, V2-Y initial 95% winrate validé)
+
+**Recommandation usage** :
+- V2-X DQN feedforward → garder defaults (`update=200`, `step=0.05`)
+- V2-Y DRQN LSTM → garder defaults V2-Y CLI (`update=50`, `step=0.05`) — JAMAIS passer `--scheduler-update-interval 200` sur V2-Y
+- Futures archis (CNN, Double DQN) → expérimenter au cas par cas
+
 ### V2-Y — état final des phases (livraison 2026-05-22)
 
 | Phase | Tâches | Statut | Tests | Commits |

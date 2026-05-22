@@ -30,6 +30,10 @@ def main() -> int:
                         help="Tailles des couches cachées du QNetwork (ex: --hidden 256 256)")
     parser.add_argument("--epsilon-decay-steps", type=int, default=50_000,
                         help="Nombre de steps pour passer ε de epsilon_start à epsilon_end (default 50000)")
+    parser.add_argument("--scheduler-update-interval", type=int, default=200,
+                        help="Périodicité (ép) du scheduler de difficulté (default V2-X consolidé : 200)")
+    parser.add_argument("--scheduler-step", type=float, default=0.05,
+                        help="Pas de difficulté du scheduler (default V2-X consolidé : 0.05)")
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -49,7 +53,10 @@ def main() -> int:
         hidden_layers=tuple(args.hidden),
         epsilon_decay_steps=args.epsilon_decay_steps,
     )
-    sched_cfg = SchedulerConfig()
+    sched_cfg = SchedulerConfig(
+        update_interval=args.scheduler_update_interval,
+        step=args.scheduler_step,
+    )
     train_cfg = TrainingConfig()
 
     cb = RunnerCallbacks(on_log=_print_log)
