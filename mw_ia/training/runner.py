@@ -254,9 +254,18 @@ class ProceduralDQNRunner(_BaseRunner):
         return DQNAgent(_ObsDimEnv(), self.dqn_cfg, device=device, seed=seed)
 
     def run(self) -> None:
+        obs_dim = 2 * self.proc_cfg.max_rows * self.proc_cfg.max_cols
         self.callbacks.fire_log(
             "info",
             f"Procedural DQN ({self.proc_cfg.mode}) sur {self.agent.device} démarrage"
+        )
+        self.callbacks.fire_log(
+            "info",
+            f"Config: hidden={self.dqn_cfg.hidden_layers} "
+            f"epsilon_decay_steps={self.dqn_cfg.epsilon_decay_steps} "
+            f"min_density={self.proc_cfg.min_density} "
+            f"max_density={self.proc_cfg.max_density} "
+            f"obs_dim={obs_dim} seed={self.train_cfg.seed}"
         )
         for ep in range(self.dqn_cfg.episodes):
             if self._stop:
@@ -351,9 +360,20 @@ class RecurrentProceduralDQNRunner(_BaseRunner):
         )
 
     def run(self) -> None:
+        obs_dim = 2 * self.proc_cfg.max_rows * self.proc_cfg.max_cols
         self.callbacks.fire_log(
             "info",
             f"Recurrent DQN ({self.proc_cfg.mode}) sur {self.agent.device} démarrage"
+        )
+        self.callbacks.fire_log(
+            "info",
+            f"Config: fc_hidden={self.drqn_cfg.fc_hidden} "
+            f"lstm_hidden={self.drqn_cfg.lstm_hidden} "
+            f"sequence_length={self.drqn_cfg.sequence_length} "
+            f"epsilon_decay_steps={self.drqn_cfg.epsilon_decay_steps} "
+            f"min_density={self.proc_cfg.min_density} "
+            f"max_density={self.proc_cfg.max_density} "
+            f"obs_dim={obs_dim} seed={self.train_cfg.seed}"
         )
         for ep in range(self.drqn_cfg.episodes):
             if self._stop:

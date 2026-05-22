@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from mw_ia.config import Config, ProceduralEnvConfig, SchedulerConfig
+from mw_ia.config import Config, DQNConfig, ProceduralEnvConfig, SchedulerConfig
 from mw_ia.envs.gridworld import GridWorld
 from mw_ia.envs.maze_generators import RandomObstaclesGenerator
 from mw_ia.envs.procedural_env import ProceduralGridWorld
@@ -166,8 +166,17 @@ class MainWindow(QMainWindow):
             min_density=proc_cfg.min_density, max_density=proc_cfg.max_density,
         )
         proc_env = ProceduralGridWorld(cfg=proc_cfg, generator=gen)
+        # Recette V2-X gagnante : hidden=(256,256), epsilon_decay_steps=200000.
+        # NE PAS utiliser self.config.dqn (defaults V1 cassés en procedural :
+        # decay=50000 trop court, hidden=128x128 sous-capacitaire). Voir
+        # CLAUDE.md §"V2-X — recette opérationnelle" pour la justification.
+        procedural_dqn_cfg = DQNConfig(
+            hidden_layers=(256, 256),
+            epsilon_decay_steps=200_000,
+            episodes=self.config.dqn.episodes,
+        )
         runner = ProceduralDQNRunner(
-            env=proc_env, proc_cfg=proc_cfg, dqn_cfg=self.config.dqn,
+            env=proc_env, proc_cfg=proc_cfg, dqn_cfg=procedural_dqn_cfg,
             sched_cfg=SchedulerConfig(), train_cfg=self.config.training,
             callbacks=RunnerCallbacks(), device=device,
             seed=self.config.training.seed,
