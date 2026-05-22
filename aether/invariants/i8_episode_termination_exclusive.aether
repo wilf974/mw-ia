@@ -1,0 +1,23 @@
+; I8 — episode_termination_exclusive
+;
+; En GridWorld V1, le step() definit :
+;   terminated = (state == goal)
+;   truncated  = (not terminated) AND (step_count >= max_steps)
+;
+; Donc par construction : NOT (terminated AND truncated).
+; On formalise la fonction truncated(terminated, step, max_steps) et l'invariant
+; sur le couple (terminated, truncated).
+;
+; Implementation Python : mw_ia/guardrails/invariants.py::episode_termination_exclusive
+; (5 episodes GridWorld avec politique aleatoire).
+
+(@intent "Predicat I8 : episode_termination_exclusive — truncated = (not terminated) AND (step >= max). Donc NOT (terminated AND truncated)")
+(@invariant (not (and terminated result)))
+(@example true 5 10 false)
+(@example false 10 10 true)
+(@example false 5 10 false)
+(@example true 10 10 false)
+(@example true 100 10 false)
+(@example false 11 10 true)
+(fn truncated ((terminated bool) (step num) (max_steps num)) bool
+  (and (not terminated) (>= step max_steps)))
