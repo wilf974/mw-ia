@@ -15,22 +15,25 @@
 
 ---
 
-## État au handoff (2026-05-22 → V2-A + V2-X LIVRÉS, attaquer sous-projet B ou évolution roadmap restante)
+## État au handoff (2026-05-22 → V2-A + V2-X + V2-Y LIVRÉS, validation V2-Y en cours)
 
 **V1** livrée et taguée `v0.1.0` (2026-05-21). DQN converge à 99 % winrate Expert sur RTX 3060 en ~19 s.
 
 **V2-A — Aether guardrails : 9 phases / 33 tâches LIVRÉES.** Tag `v0.2.0-a` posé. 95 tests pytest verts (52 V1 + 43 V2-A). ~24 commits V2-A sur `main`.
 
-**V2-X — Procedural environment & curriculum learning : 13 phases / 16 tâches LIVRÉES.** Tag `v0.2.0-x` posé. **148 tests pytest verts** (95 baseline + 53 V2-X). 17 commits V2-X sur `main`. Smoke E2E maze 50 ép → winrate 94 % et scheduler s'est déclenché (diff 0 → 0.05 au seuil winrate ≥ 80 %) — curriculum opérationnel.
+**V2-X — Procedural environment & curriculum learning : 13 phases / 16 tâches LIVRÉES.** Tag `v0.2.0-x` posé. 148 tests pytest verts (95 baseline + 53 V2-X). 17 commits V2-X sur `main`. Smoke E2E maze 50 ép → winrate 94 % et scheduler s'est déclenché. **Plafond architectural identifié** : DQN feedforward ne dépasse pas diff~0.10 même avec recette gagnante (`--hidden 256 256 --epsilon-decay-steps 200000`), winrate ~80 %. Cf. section "V2-X — recette opérationnelle" plus bas.
 
-### Sous-projet V2-A et V2-X — décomposition du programme V2 + évolutions
+**V2-Y — Deep Recurrent Q-Network (LSTM) : 9 phases / 13 tâches LIVRÉES.** Tag `v0.2.0-y` posé. **183 tests pytest verts** (148 baseline + 35 V2-Y). 12 commits V2-Y sur `main`. Motivation : franchir le plafond V2-X via mémoire neuronale temporelle. Smoke E2E maze 20 ép CPU → 100 % winrate à diff=0. **Critère succès final à valider en grand entraînement** : bucket 1 du tracker (diff 0.20-0.40) ≥ 70 % winrate sur 5000 ép.
 
-La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (A-F). En parallèle, des évolutions roadmap (`V2-X`, `V2-Y`...) sont livrables indépendamment quand naturel. **A et X sont terminés** ; **B** reste le prochain sous-projet "auto-amélioration" naturel.
+### Sous-projets — décomposition du programme V2 + évolutions
+
+La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (A-F). En parallèle, des évolutions roadmap (`V2-X`, `V2-Y`...) sont livrables indépendamment quand naturel. **A, X et Y sont terminés** ; **B** reste le prochain sous-projet "auto-amélioration" naturel.
 
 | # | Sous-projet | Statut |
 |---|---|---|
 | **A** | Aether guardrails | ✅ Livré (tag `v0.2.0-a`) |
 | **X** | Environnement procédural + curriculum | ✅ Livré (tag `v0.2.0-x`) |
+| **Y** | Deep Recurrent Q-Network (LSTM, roadmap #1) | ✅ Livré (tag `v0.2.0-y`) |
 | **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
@@ -137,6 +140,41 @@ python scripts/train_dqn_procedural.py \
 
 **Comportement adaptatif vérifié** : avec la recette gagnante, le scheduler monte à diff 0.10 (winrate ≥ 80%), l'agent struggle, scheduler redescend à 0.05 (winrate ≤ 30%), agent réapprend, retest. Mécanisme PCG-RL canonique opérationnel.
 
+### V2-Y — état final des phases (livraison 2026-05-22)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Setup (scaffold neural/ + tests/neural/) | T1 | ✅ | — | 1 |
+| 2 — `RecurrentQNetwork` (init + forward 1 step + séquence) | T2-T3 | ✅ | 7 | 2 |
+| 3 — `SequenceReplayBuffer` (push_trajectory + sample padding+mask) | T4-T5 | ✅ | 9 | 2 |
+| 4 — `RecurrentDQNTrainer` (BPTT + Huber masquée + AMP) | T6 | ✅ | 3 | 1 |
+| 5 — `DRQNConfig` (frozen dataclass + validation) | T7 | ✅ | 6 | 1 |
+| 6 — `RecurrentDQNAgent` (init + hidden state runtime + observe + end_episode) | T8-T9 | ✅ | 8 | 2 |
+| 7 — `RecurrentProceduralDQNRunner` (extension runner.py) | T10 | ✅ | 2 | 1 (+ fix mineur agent inclus) |
+| 8 — CLI `train_drqn_procedural.py` + CI smoke | T11 | ✅ | — | 1 |
+| 9 — README V2-Y + DoD + tag `v0.2.0-y` | T12-T13 | ✅ | — | 1 + tag |
+
+### Composants V2-Y livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `RecurrentQNetwork` | `mw_ia/neural/recurrent.py` | `Linear → ReLU → LSTM → Linear`, `batch_first=False`, hidden tuple `(h, c)` ou `None` (auto-init zéros) |
+| `SequenceReplayBuffer`, `BatchSeq` | `mw_ia/neural/sequence_buffer.py` | Buffer circulaire de trajectoires (capacity = nombre de trajectoires, PAS transitions). Sample : `B` trajectoires × fenêtre seq_len aléatoire, padding zéros + mask (1=vrai step, 0=padding) |
+| `RecurrentDQNTrainer` | `mw_ia/neural/recurrent_trainer.py` | BPTT 32 steps, Huber `reduction="none"` × mask, AMP + grad clip 10 |
+| `DRQNConfig` | `mw_ia/config.py` | frozen dataclass, defaults : fc=256, lstm=128, seq=32, replay_capacity=5000 trajectoires, decay=200_000, episodes=5_000 |
+| `RecurrentDQNAgent` | `mw_ia/agents/recurrent_dqn.py` | Hidden state runtime maintenu (y compris en ε-random), reset_hidden/begin_episode/end_episode hooks, train à fin d'épisode, fix `max(min_episodes_to_learn, batch_size)` pour buffer sample |
+| `RecurrentProceduralDQNRunner` | `mw_ia/training/runner.py` | Extension parallèle au `ProceduralDQNRunner` V2-X (V2-X intact) |
+| CLI | `scripts/train_drqn_procedural.py` | Args `--fc-hidden`, `--lstm-hidden`, `--sequence-length`, `--epsilon-decay-steps` |
+
+**Décisions techniques V2-Y** :
+
+- **DRQN simple (Hausknecht & Stone 2015), pas burn-in R2D2** : hidden state zero-init au début de chaque séquence d'entraînement (bias accepté en MVP).
+- **Hidden state runtime maintenu y compris en ε-random** : le LSTM doit observer la trajectoire complète d'obs indépendamment des choix d'action de l'agent.
+- **Train step à la fin d'épisode** (pas à chaque step comme V1) : DRQN nécessite trajectoires complètes pour BPTT. `train_steps_per_episode=4` par défaut.
+- **`replay_capacity` = nombre de TRAJECTOIRES** dans `SequenceReplayBuffer` (vs V1 `ReplayBuffer` qui compte des transitions). À ne pas confondre.
+- **Fix `end_episode()` train trigger** : seuil corrigé de `>= min_episodes_to_learn` à `>= max(min_episodes_to_learn, batch_size)` pour éviter `ValueError` du buffer sample quand `batch_size > min_episodes_to_learn`. Inclus dans commit `18d09d9` (avec le runner). Concern d'atomicité commit notée mais correction acceptée pour correctness.
+- **Padding zéros + mask** plutôt que séquences fixes : permet d'entraîner sur des épisodes courts (agent atteint goal en 18 steps → 14 dernières fenêtres paddées, mask les exclut du gradient).
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
@@ -222,7 +260,8 @@ MW_IA/
 ├── scripts/
 │   ├── train_tabular.py
 │   ├── train_dqn.py                    # V1 fix-map
-│   ├── train_dqn_procedural.py         # [V2-X] CLI procedural
+│   ├── train_dqn_procedural.py         # [V2-X] CLI procedural DQN feedforward
+│   ├── train_drqn_procedural.py        # [V2-Y] CLI procedural DRQN (LSTM)
 │   └── launch_gui.py
 ├── mw_ia/
 │   ├── config.py                       # + ProceduralEnvConfig + SchedulerConfig [V2-X]
@@ -231,11 +270,18 @@ MW_IA/
 │   │   ├── maze_generators.py          # [V2-X] maze_bfs_check + 2 générateurs
 │   │   └── procedural_env.py           # [V2-X] ProceduralGridWorld + encode helper
 │   ├── agents/                         # V1 inchangé
-│   ├── neural/                         # V1 inchangé (QNetwork déjà paramétrable input_dim)
+│   ├── neural/
+│   │   ├── network.py                  # V1 inchangé (QNetwork déjà paramétrable input_dim)
+│   │   ├── replay_buffer.py            # V1 inchangé
+│   │   ├── trainer.py                  # V1 inchangé
+│   │   ├── recurrent.py                # [V2-Y] RecurrentQNetwork (Linear+LSTM+Linear)
+│   │   ├── sequence_buffer.py          # [V2-Y] SequenceReplayBuffer + BatchSeq
+│   │   └── recurrent_trainer.py        # [V2-Y] RecurrentDQNTrainer (BPTT masqué)
+│   ├── agents/                         # V1 (q_learning, value_iteration, dqn) + [V2-Y] recurrent_dqn.py
 │   ├── training/
 │   │   ├── metrics.py                  # + DifficultyBucketTracker + has_data() [V2-X]
 │   │   ├── scheduler.py                # [V2-X] AdaptiveDifficultyScheduler
-│   │   └── runner.py                   # + ProceduralDQNRunner + 2 callbacks GUI [V2-X]
+│   │   └── runner.py                   # + ProceduralDQNRunner [V2-X] + RecurrentProceduralDQNRunner [V2-Y]
 │   ├── persistence/checkpoint.py
 │   ├── gui/
 │   │   ├── theme.py
@@ -258,18 +304,27 @@ MW_IA/
 │   ├── README.md
 │   ├── verify_all.sh
 │   └── invariants/iN_*.aether          # 8 fichiers
-├── tests/                              # 148 tests (52 V1 + 43 V2-A + 53 V2-X)
+├── tests/                              # 183 tests (52 V1 + 43 V2-A + 53 V2-X + 35 V2-Y)
 │   ├── (V1 inchangés)
 │   ├── guardrails/                     # [V2-A]
 │   ├── envs/                           # [V2-X]
 │   │   ├── conftest.py                 # fixture rng seedée
 │   │   ├── test_maze_generators.py     # 18 tests (BFS + 2 générateurs + property-based)
 │   │   └── test_procedural_env.py      # 10 tests (env wrapper + encode)
-│   ├── training/                       # [V2-X]
+│   ├── neural/                         # [V2-Y]
+│   │   ├── conftest.py                 # fixture cpu_device
+│   │   ├── test_recurrent.py           # 7 tests (RecurrentQNetwork)
+│   │   ├── test_sequence_buffer.py     # 9 tests (push + sample padding+mask)
+│   │   └── test_recurrent_trainer.py   # 3 tests (BPTT + mask + sync_target)
+│   ├── agents/                         # [V2-Y]
+│   │   └── test_recurrent_dqn.py       # 8 tests (init + reset_hidden + observe + end_episode)
+│   ├── training/                       # [V2-X + V2-Y]
 │   │   ├── test_scheduler.py           # 7 tests
 │   │   ├── test_bucket_tracker.py      # 5 tests
-│   │   └── test_procedural_runner.py   # 3 tests d'intégration
-│   └── test_procedural_config.py       # [V2-X] 9 tests
+│   │   ├── test_procedural_runner.py   # 3 tests d'intégration V2-X
+│   │   └── test_recurrent_procedural_runner.py  # 2 tests d'intégration V2-Y
+│   ├── test_procedural_config.py       # [V2-X] 9 tests
+│   └── test_drqn_config.py             # [V2-Y] 6 tests
 ├── checkpoints/                        # .pt / .npz (gitignored)
 ├── logs/
 └── docs/superpowers/
@@ -277,10 +332,16 @@ MW_IA/
     │   ├── 2026-05-21-mw-ia-rl-design.md                     # V1
     │   ├── 2026-05-21-mw-ia-v2-aether-guardrails-design.md   # V2-A
     │   └── 2026-05-22-mw-ia-procedural-env-design.md         # V2-X
+    ├── specs/
+    │   ├── 2026-05-21-mw-ia-rl-design.md                     # V1
+    │   ├── 2026-05-21-mw-ia-v2-aether-guardrails-design.md   # V2-A
+    │   ├── 2026-05-22-mw-ia-procedural-env-design.md         # V2-X
+    │   └── 2026-05-22-mw-ia-recurrent-network-design.md      # V2-Y
     └── plans/
         ├── 2026-05-21-mw-ia-v1.md                            # V1
         ├── 2026-05-21-mw-ia-v2-aether-guardrails.md          # V2-A
-        └── 2026-05-22-mw-ia-procedural-env.md                # V2-X (16 tâches sur 13 phases — toutes ✅)
+        ├── 2026-05-22-mw-ia-procedural-env.md                # V2-X (16 tâches sur 13 phases — toutes ✅)
+        └── 2026-05-22-mw-ia-recurrent-network.md             # V2-Y (13 tâches sur 9 phases — toutes ✅)
 ```
 
 ---
@@ -291,7 +352,7 @@ MW_IA/
 ```bash
 source .venv/Scripts/activate && pytest -q
 ```
-Attendu : **148 passed** (52 V1 + 43 V2-A + 53 V2-X).
+Attendu : **183 passed** (52 V1 + 43 V2-A + 53 V2-X + 35 V2-Y).
 
 ### Entraîner Q-Learning tabulaire (headless)
 ```bash
@@ -316,6 +377,13 @@ Boutons : "Démarrer" (V1 fix-map) ou "Démarrer (procedural)" (V2-X mazes aléa
 ```bash
 source .venv/Scripts/activate && python scripts/train_dqn_procedural.py --episodes 500 --mode obstacles --device cuda
 # ou : --mode maze
+# recette gagnante V2-X : --hidden 256 256 --epsilon-decay-steps 200000
+```
+
+### Entraîner Recurrent DQN procedural (headless V2-Y)
+```bash
+source .venv/Scripts/activate && python scripts/train_drqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+# Defaults V2-Y déjà gagnants : fc_hidden=256, lstm_hidden=128, sequence_length=32, epsilon_decay_steps=200000
 ```
 
 Sortie : winrate global + per-bucket (5 buckets de difficulté) + difficulté finale.
@@ -373,6 +441,12 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 12. **V2-X observation procedural** : `encode_procedural_observation` produit `concat(position_one_hot, grid_flatten)` de dim `2 * max_rows * max_cols` (= 200 pour 10×10), pas `[row, col, *grid]` comme la spec V2-X originale le suggérait. Aligné sur le pattern V1 `DQNRunner._state_vec`. Mazes plus petits que `max_size` paddés top-left avec zéros (cellules libres) — l'agent voit des bordures artificielles qu'il apprend à ignorer.
 
+13. **V2-Y `SequenceReplayBuffer.replay_capacity` = nombre de TRAJECTOIRES** (pas transitions). Memory budget `5000 traj × 200 max_steps × 200 obs_dim × 4 bytes × 2 (state + next_state)` ≈ 1.6 GB sur RTX 3060. Si OOM : descendre à 2000 trajectoires.
+
+14. **V2-Y hidden state runtime maintenu y compris en ε-random** : l'agent `act()` fait TOUJOURS le forward LSTM (pour mettre à jour `_hidden_state`), même quand ε-greedy tire random. C'est cohérent avec le but du LSTM : suivre la trajectoire d'observations indépendamment des choix d'action. Documenté dans la docstring de `act()`.
+
+15. **V2-Y train trigger** : `end_episode()` ne déclenche les `train_steps_per_episode` batches que si `len(buffer) >= max(min_episodes_to_learn, batch_size)`. Le `max(...)` évite `ValueError` du buffer sample quand l'utilisateur configure `batch_size > min_episodes_to_learn`. Inclus dans commit `18d09d9` avec une note d'atomicité (2 fichiers dans 1 commit, dérogation acceptée pour correctness).
+
 ---
 
 ## Mémoires persistantes liées
@@ -388,17 +462,17 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 ### Reprise par défaut — attaquer un nouveau sous-projet
 
-V2-A et V2-X étant terminés, la **suite naturelle** est :
+V2-A, V2-X et V2-Y étant terminés, la **suite naturelle** est :
+- soit **valider V2-Y avec un grand entraînement** (5000 ép sur RTX 3060) — voir si le LSTM franchit le plafond V2-X (bucket 1 winrate ≥ 70 % à diff 0.20-0.40) ;
 - soit le **sous-projet B (mémoire persistante cross-session)** — RVF, agent qui se souvient d'une session à l'autre ;
-- soit une **autre évolution roadmap** (LSTM/GRU pour mémoire neuronale, CNN perception visuelle, personnalités d'IA, multi-objectifs, visualisation neuronale GUI, Double DQN…) ;
-- soit **observer V2-X en grand entraînement (1000-5000 ép.)** pour quantifier l'oubli catastrophique des niveaux faciles → décision de lancer D (continual learning) en fonction.
+- soit une **autre évolution roadmap** (CNN perception visuelle roadmap #2, personnalités d'IA roadmap #3, multi-objectifs roadmap #4, visualisation neuronale GUI roadmap #6, Double DQN roadmap #7…).
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 148 passed. + `bash aether/verify_all.sh` → 8 OK.
+   Attendu : 183 passed. + `bash aether/verify_all.sh` → 8 OK.
 3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
@@ -410,9 +484,9 @@ V2-A et V2-X étant terminés, la **suite naturelle** est :
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 148 passed)
-- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/training/scheduler.py`, `mw_ia/envs/procedural_env.py`) sans raison documentée
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 183 passed)
+- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`) sans raison documentée
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)
 
