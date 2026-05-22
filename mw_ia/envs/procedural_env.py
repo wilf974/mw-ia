@@ -75,3 +75,44 @@ class ProceduralGridWorld:
     def inner(self) -> GridWorld:
         assert self._inner is not None, "reset() doit être appelé avant inner"
         return self._inner
+
+
+def encode_procedural_observation(
+    *, state: tuple[int, int], grid: np.ndarray, max_rows: int, max_cols: int
+) -> np.ndarray:
+    """Encode l'observation procédural pour QNetwork.
+
+    Format : concat(position_one_hot, grid_flatten) → np.float32 de dim 2*max_rows*max_cols.
+
+    Pour les mazes plus petits que max_rows × max_cols (mode maze parfait avec
+    difficulté variable), la grille est placée top-left dans une zone paddée
+    de zéros (= cellules libres). Conséquence : l'agent voit des bordures
+    artificielles qu'il apprend à ignorer.
+
+    Args:
+        state: position (row, col) de l'agent.
+        grid: maze actuel (rows ≤ max_rows, cols ≤ max_cols), True = obstacle.
+        max_rows: nombre de rangées max (dim du QNetwork).
+        max_cols: nombre de colonnes max.
+
+    Returns:
+        np.ndarray[float32] de shape (2 * max_rows * max_cols,).
+    """
+    rows, cols = grid.shape
+    assert rows <= max_rows and cols <= max_cols, (
+        f"grid {grid.shape} > max ({max_rows}, {max_cols})"
+    )
+
+    n_cells = max_rows * max_cols
+    obs = np.zeros(2 * n_cells, dtype=np.float32)
+
+    # Position one-hot dans la grille max_rows × max_cols
+    r, c = state
+    obs[r * max_cols + c] = 1.0
+
+    # Grid paddé top-left dans la deuxième moitié
+    padded = np.zeros((max_rows, max_cols), dtype=np.float32)
+    padded[:rows, :cols] = grid.astype(np.float32)
+    obs[n_cells:] = padded.flatten()
+
+    return obs
