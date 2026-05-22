@@ -89,3 +89,48 @@ class SequenceReplayBuffer:
         self._lengths[i] = n
         self._idx = (self._idx + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
+
+    def sample(self, batch_size: int, seq_len: int) -> BatchSeq:
+        """Tire batch_size trajectoires aléatoires, fenêtre aléatoire seq_len chacune.
+
+        Padding zéros + mask=0 si trajectoire plus courte que seq_len.
+        """
+        if self._size < batch_size:
+            raise ValueError(
+                f"buffer trop petit ({self._size}) pour batch={batch_size}"
+            )
+        if seq_len <= 0 or seq_len > self.max_steps:
+            raise ValueError(
+                f"seq_len {seq_len} hors ]0, {self.max_steps}]"
+            )
+
+        traj_idxs = self._rng.integers(0, self._size, size=batch_size)
+
+        states = np.zeros((seq_len, batch_size, self.obs_dim), dtype=np.float32)
+        actions = np.zeros((seq_len, batch_size), dtype=np.int64)
+        rewards = np.zeros((seq_len, batch_size), dtype=np.float32)
+        next_states = np.zeros((seq_len, batch_size, self.obs_dim), dtype=np.float32)
+        dones = np.zeros((seq_len, batch_size), dtype=np.float32)
+        mask = np.zeros((seq_len, batch_size), dtype=np.float32)
+
+        for b, traj_i in enumerate(traj_idxs):
+            length = int(self._lengths[traj_i])
+            # Offset aléatoire ∈ [0, max(0, length - seq_len)]
+            max_offset = max(0, length - seq_len)
+            offset = int(self._rng.integers(0, max_offset + 1))
+            real_len = min(seq_len, length - offset)
+            states[:real_len, b] = self._states[traj_i, offset:offset + real_len]
+            actions[:real_len, b] = self._actions[traj_i, offset:offset + real_len]
+            rewards[:real_len, b] = self._rewards[traj_i, offset:offset + real_len]
+            next_states[:real_len, b] = self._next_states[traj_i, offset:offset + real_len]
+            dones[:real_len, b] = self._dones[traj_i, offset:offset + real_len]
+            mask[:real_len, b] = 1.0
+
+        return BatchSeq(
+            states=states,
+            actions=actions,
+            rewards=rewards,
+            next_states=next_states,
+            dones=dones,
+            mask=mask,
+        )
