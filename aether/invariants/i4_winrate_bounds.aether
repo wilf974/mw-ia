@@ -1,0 +1,18 @@
+; I4 — winrate_bounds
+;
+; Le winrate = wins / window est dans [0,1] sous les hypotheses :
+;   - window > 0
+;   - 0 <= wins <= window
+;
+; Implementation Python : mw_ia/guardrails/invariants.py::winrate_bounds
+; (200 episodes simules via MetricsTracker).
+
+(@intent "Predicat I4 : winrate_bounds — winrate = wins/window ∈ [0,1] sous wins ∈ [0, window]")
+(@invariant (and (>= result 0.0) (<= result 1.0)))
+(@example 0 100 0.0)
+(@example 50 100 0.5)
+(@example 100 100 1.0)
+(@example 33 100 0.33)
+(@example 1 1 1.0)
+(@example 0 1 0.0)
+(fn winrate ((wins num) (window num)) num (/ wins window))
