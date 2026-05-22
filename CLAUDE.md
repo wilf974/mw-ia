@@ -410,61 +410,86 @@ q_next = self.target(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
 3. **CLI default V2-W casse silencieusement la repro V2-Z** : documenter explicitement "Pour reproduire la baseline V2-Z, ajouter `--no-double-dqn`". GUI → V2-W automatique (acceptable car recommandation).
 4. **save/load checkpoint avec / sans flag** : `cfg.__dict__` sauvegardé inclut maintenant `double_dqn`. Le `load()` V1-hérité ne re-construit pas cfg → l'utilisateur doit reconstruire l'agent avec le bon `cfg.double_dqn` avant load. À noter mais non-critique en MVP.
 
-### V2-W — benchmark same-seed n=3 V2-Z vs V2-W (2026-05-22)
+### V2-W — benchmark same-seed n=5 V2-Z vs V2-W (2026-05-22, consolidé)
 
-**Validation empirique post-livraison** : 3 runs GPU 5000 ép obstacles, mêmes seeds que V2-Z baseline (0/1/2), defaults V2-W (`--double-dqn`, autres flags identiques V2-Z).
+**Validation empirique post-livraison** : 5 seeds GPU 5000 ép obstacles (0/1/2/3/4), mêmes seeds entre V2-Z baseline et V2-W (`--double-dqn`), defaults V2-Z et V2-W par ailleurs identiques.
 
-**Comparaison same-seed (la seule variable changée = formule du Q-target)** :
+**Note historique** : la version initiale de cette section documentait un benchmark n=3 (seeds 0/1/2 uniquement) avec un narratif "V2-W écrase la variance 5.4× + élimine le worst-case". **Cette interprétation était un cherry-pick statistique** : les seeds 3 et 4 ajoutés post-livraison ont **invalidé** la claim de variance et **révélé** un failure mode beaucoup plus intéressant (late-stage collapse). Section ré-écrite ci-dessous avec le n=5 honnête.
 
-| Seed | V2-Z (DQN classique) | V2-W (Double DQN) | Δ diff | Δ bucket 1 |
-|---|---|---|---|---|
-| **0** (worst-case V2-Z) | 54 % @ diff=**0.10** | **62 % @ diff=0.40** | **+0.30** | vide → **62 %** |
-| **1** | 65 % @ diff=0.25 | **68 % @ diff=0.35** | +0.10 | 65 % → 68 % |
-| **2** | 51 % @ diff=0.35 | **81 % @ diff=0.40** | +0.05 | 51 % → **81 %** ✓ |
+**Résultats individuels par seed (n=5)** :
 
-**Statistiques agrégées (cumul 6 runs, comparaison n=3 vs n=3)** :
-
-| Métrique | V2-Z | V2-W | Évolution |
+| Seed | V2-Z (DQN classique) | V2-W (Double DQN) | Pattern observé |
 |---|---|---|---|
-| Diff max moyenne | 0.23 | **0.38** | **+65 %** |
-| Diff max écart-type | ±0.13 | **±0.024** | **−82 % (réduction 5.4×)** |
-| Bucket 1 rempli (sur 3 seeds) | 2/3 | **3/3** | +1 seed |
-| Bucket 1 winrate moyenne | 39 % (vide=0) | **70.3 %** | **+31 pp** |
-| Bucket 1 ≥ 70 % strict | 0/3 | 1/3 (seed 2) | +1 seed |
-| Worst-case seed 0 | diff=0.10 | **diff=0.40** | **éliminé** ✓ |
+| 0 | 54 % @ diff=0.10 | **62 % @ diff=0.40** | V2-W stable jusqu'à fin |
+| 1 | 65 % @ diff=0.25 | **68 % @ diff=0.35** | V2-W stable jusqu'à fin |
+| 2 | 51 % @ diff=0.35 | **81 % @ diff=0.40** | V2-W stable jusqu'à fin |
+| **3** | **6 % @ diff=0.00** | **49 % @ diff=0.15** | V2-W atteint 0.30 puis crash ep 3470 → récup partielle |
+| **4** | **15 % @ diff=0.00** | **1 % @ diff=0.10** | V2-W atteint 80 % @ 0.30 ep 3460 puis **collapse catastrophique** (R=-44 à ep 4960) |
+
+**Statistiques agrégées (n=5 vs n=5)** :
+
+| Métrique | V2-Z (n=5) | V2-W (n=5) | Évolution |
+|---|---|---|---|
+| Diff max moyenne | **0.14** | **0.28** | **+100 % (doublé)** ✓ |
+| Diff max écart-type | ±0.139 | **±0.129** | **−7 % (négligeable, n=3 disait −82% — invalidé)** |
+| Bucket 1 rempli | 2/5 (40 %) | **5/5 (100 %)** | +60 pp ✓ |
+| Bucket 1 winrate moyenne | 23 % | **44 %** | +21 pp ✓ |
+| Bucket 1 ≥ 70 % strict | 0/5 | 1/5 (seed 2 = 81 %) | +1 seed |
+| Seeds réussites (diff ≥ 0.25) | 2/5 | **3/5** | +1 seed |
+| Seeds échec total (diff = 0) | 2/5 | 0/5 | V2-W toujours non-zéro |
 
 **Critère succès V2-W (spec)** :
 
-1. ✅ **Variance écart-type < ±0.05** : **±0.024** — **largement atteint** (réduction 5.4×)
-2. ⚠️ **Bucket 1 ≥ 70 % sur ≥ 2/3 seeds** : seulement **1/3** atteint strictement (seed 2 = 81 %). Moyenne bucket 1 = 70.3 % (juste au-dessus du seuil), bucket 1 rempli sur **3/3 seeds**.
+1. ❌ **Variance écart-type < ±0.05** : **±0.129** — **FAIL** (n=3 préliminaire l'avait artificiellement à ±0.024)
+2. ❌ **Bucket 1 ≥ 70 % sur ≥ 2/3 seeds** : 1/5 (seed 2 = 81 %) — **FAIL** sur stat consolidée
 
-**Verdict** : critère atteint au sens "moyenne dépasse seuil", raté au sens "2/3 seeds individuellement ≥ 70 %". V2-W est à la frontière du critère strict, mais le finding causal est solide.
+**Verdict honnête** : le critère succès strict de la spec V2-W n'est **PAS** atteint sur n=5. Mais l'**effet mean** est doublement plus fort que sur n=3 (+100 % vs +65 %). Le tag `v0.2.0-w` reste posé car la livraison code est complète et l'effet mean est réel.
 
-**Lecture causale (same-seed)** :
+**Story scientifique consolidée n=5** :
 
-> Avec mêmes seed/env/init poids/rng buffer initial, seule variable changée = formule du target Q-value. Le seed 0 qui plafonnait à diff=0.10 (V2-Z) atteint diff=0.40 (V2-W). **Ce n'est pas du bruit, c'est l'effet causal de Double DQN sur la stabilité de convergence.**
-
-**Story scientifique consolidée n=3 par variante** :
-
-| Levier | Variante | Effet empirique |
+| Levier | Variante | Effet empirique n=5 |
 |---|---|---|
 | Mémoire seule | V2-Y LSTM (n=2) | Plafond identique V2-X (diff=0.05) malgré meilleur winrate |
-| Perception spatiale seule | V2-Z CNN (n=3) | Débloque le palier (diff_max ∈ [0.10, 0.35]) MAIS variance ±0.13 instable |
-| Perception + objectif stable | **V2-W CNN + Double DQN (n=3)** | **Variance écrasée (±0.024), bucket 1 rempli 3/3, diff_max ∈ [0.35, 0.40], worst-case éliminé** |
+| Perception spatiale seule | V2-Z CNN (n=5) | diff_max ∈ [0.00, 0.35], variance ±0.139 — 2/5 échouent complètement (catastrophic late collapse) |
+| Perception + objectif stable | V2-W CNN + Double DQN (n=5) | diff_max ∈ [0.10, 0.40], variance ±0.129 — **mean doublé** mais 1/5 collapse catastrophique tardif |
 
-**Conclusion empirique** : la représentation spatiale (V2-Z) ET la stabilité de l'objectif d'apprentissage (V2-W) sont **deux bottlenecks indépendants** du curriculum procédural. Aucun seul ne suffit. Le combo CNN + Double DQN écrase la variance de convergence et débloque le bucket 1 sur 3/3 seeds, avec moyenne 70.3 %.
+**Le finding nouveau et plus intéressant** :
 
-**Pour atteindre le critère strict (2/3 seeds ≥ 70 % au bucket 1)** — candidats post-V2-W :
+> Le pic V2-W est atteint vers ep 2000-3500 (jusqu'à 80-81 % @ diff=0.30) **avant** un collapse tardif sur certains seeds. Ni V2-Z ni V2-W ne résolvent ce qui apparaît maintenant comme le **bottleneck #3 : stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique**.
 
-1. **target_sync_steps plus court** (default 1000 → 500) : sync target net plus fréquente → moins de stale Q-values → potentiellement bucket 1 + 5-10 pp
-2. **Plus d'épisodes** (5000 → 10000) : ε descend plus bas, exploitation plus profonde
-3. **conv_channels plus larges** ((32, 64) → (32, 64, 128)) : capacité supplémentaire pour patterns complexes
-4. **V2-ZY CNN-LSTM combiné** : ajouter mémoire récurrente sur perception spatiale + Double DQN (combo des 3 leviers)
+**Pattern unifié du failure mode V2-W seeds 3/4** :
 
-### V2-W — pièges connus (consolidés post-benchmark)
+```
+Phase 1 (ep 0-3000)  : apprentissage rapide, agent compétent jusqu'à diff=0.30 (winrate 70-81 %)
+Phase 2 (ep ~3000)   : scheduler pousse vers diff supérieur (0.30 → 0.35 ou 0.20 → 0.30)
+Phase 3 (ep 3500-5000) : crash catastrophique, agent fully-greedy (ε=0.05) sans safety net
+                          → policy divergence, Q-values probablement explosent
+                          → recovery partielle (seed 3) ou totale absence de recovery (seed 4)
+```
 
-5. **Benchmark same-seed VRAIMENT same-seed** : `torch.manual_seed(seed)` + `numpy.random.default_rng(seed)` couvrent toutes les sources de stochasticité dans `ConvDQNAgent.__init__` (init poids online/target via Conv2d.reset_parameters, rng `ReplayBuffer`, rng env via `seed=ep` à chaque reset). Empiriquement validé par les 6 runs (variance dramatique entre V2-Z et V2-W avec mêmes seeds).
-6. **`diff=0.40` route au bucket 1 par flottant arithmétique** : `int(0.40 * 5)` peut donner 1 ou 2 selon précision IEEE 754. Sur les 3 runs V2-W, les épisodes finaux à diff=0.40 ont été routés au bucket 1 (cumulatif > 0 sur bucket 1, vide sur bucket 2). À surveiller si on monte vers diff=0.60+.
+**Hypothèse causale** : les seeds 0/1/2 V2-W ont **convergé plus lentement** (diff=0.40 atteinte plus tard, vers ep 4000-5000), **possiblement avant le déclenchement du collapse**. Si entraînés à 10000 ép, ils auraient probablement aussi collapsé. Le n=3 "succès" était peut-être un timing artifact.
+
+**Le finding pratique le plus important** :
+
+> **Le meilleur agent V2-W existe avant ep 3500. L'entraînement après ep 3500 le détruit sur certains seeds.**
+
+C'est un signal très fort pour **best-checkpoint tracking + early stopping**.
+
+### V2-W — pièges connus (consolidés n=5)
+
+5. **Cherry-pick statistique n=3 → n=5** : la première section "variance ±0.024, worst-case éliminé" était basée sur 3 seeds qui ont tous tenu jusqu'à la fin. n=5 a révélé que 1/5 V2-W collapse catastrophiquement (seed 4), ce qui rapproche l'écart-type V2-W de celui V2-Z. **Toujours valider avec n ≥ 5 avant de figer une claim de variance.**
+
+6. **Late-stage catastrophic collapse** : pathologie observée sur 4/4 seeds collapsés (V2-Z seeds 3/4 + V2-W seeds 3/4). Signature : (a) epsilon saturé à 0.05, (b) policy fully-greedy, (c) push scheduler vers diff supérieur, (d) crash brutal sur 500-1500 ép, (e) recovery impossible. Classic DQN deadlock — Double DQN aide mais ne résout pas.
+
+7. **`diff=0.40` route au bucket 1 par flottant arithmétique** : `int(0.40 * 5)` peut donner 1 ou 2 selon précision IEEE 754. Sur les runs V2-W qui ont atteint diff=0.40, les épisodes finaux ont été routés au bucket 1 (cumulatif > 0 sur bucket 1, vide sur bucket 2). À surveiller si on monte vers diff=0.60+.
+
+### Candidats de remédiation (par ordre de ROI scientifique)
+
+1. **Test ep=3000** sur V2-W seeds 0-4 : si les seeds qui collapsent à ep 5000 sont meilleurs à ep 3000, le bottleneck est "on entraîne trop". Test crucial avant tout autre changement. ~50 min GPU.
+2. **Best-checkpoint tracking** : sauvegarder le model au pic de winrate (sur fenêtre rolling), pas au dernier épisode. Si validé par ep=3000 test, c'est le meilleur ROI pour récupérer le finding pratique.
+3. **Soft target update (Polyak τ=0.005)** au lieu de hard sync 1000 steps : prévient target/online drift. ~10 LOC modif trainer.
+4. **Learning rate plus bas** (1e-4 au lieu de 1e-3) : stabilité long-terme.
+5. **Epsilon floor plus haut** (0.10 au lieu de 0.05) : exploration safety net permanent.
 
 ---
 
@@ -758,21 +783,24 @@ V2-A, V2-X, V2-Y, V2-Z (CNN) ET V2-W (Double DQN) étant terminés, **la prochai
 **Diagnostic empirique fin de session 2026-05-22** :
 > V2-Z CNN livré tag `v0.2.0-z` + run 5000 ép GPU consolidé : **franchit diff=0.05 → 0.10** (V2-X et V2-Y plafonnaient à 0.05). Plafond résiduel à diff=0.10 (winrate 44-54 %, scheduler bloqué). Symptôme classique de surestimation Q-values DQN → cible naturelle = Double DQN. Cf. section "V2-Z — baseline CNN empirique 5000 ép" pour les détails.
 
-**V2-W validation empirique : EFFECTUÉE (2026-05-22)** :
+**V2-W validation empirique : EFFECTUÉE n=5 (2026-05-22, narratif corrigé)** :
 
-Benchmark same-seed n=3 V2-Z vs V2-W terminé (cf. section "V2-W — benchmark same-seed n=3" plus haut). Résultats résumés :
-- ✅ **Variance ±0.024** (cible <±0.05) — réduction 5.4× vs V2-Z
-- ⚠️ **Bucket 1 ≥ 70 % strict : 1/3 seeds** (seed 2 = 81 %), mais moyenne 70.3 %, bucket 1 rempli sur 3/3
-- ✅ **Worst-case seed 0 éliminé** : diff=0.10 → diff=0.40 (même seed, seule variable changée = Double DQN)
+Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmark same-seed n=5" plus haut). **Le narratif n=3 initial était trop optimiste** ; n=5 a corrigé le diagnostic :
 
-**Story scientifique consolidée** : représentation spatiale (V2-Z) ET stabilité Q (V2-W) sont 2 bottlenecks indépendants. Ni la mémoire seule (V2-Y) ni la perception seule (V2-Z) ne suffisent.
+- ❌ **Variance ±0.129** (cible <±0.05) — la claim n=3 "±0.024 / réduction 5.4×" était un **cherry-pick statistique**
+- ❌ **Bucket 1 ≥ 70 % strict : 1/5 seeds** (seed 2 = 81 %), V2-W rate son critère sur la stat consolidée
+- ✅ **Mean diff doublé** : V2-Z 0.14 → V2-W 0.28 (+100 %, plus fort que la claim n=3 +65 %)
+- ✅ **Bucket 1 rempli sur 5/5 seeds** (vs 2/5 V2-Z)
+- ⚠️ **Failure mode unifié** : late-stage catastrophic collapse découvert sur seeds 3/4 V2-W (pic 80 % @ diff=0.30 vers ep 3000, puis crash à ep 4000+)
 
-**Prochaines étapes possibles** (priorité à débrainstormer en session fraîche) :
+**Story scientifique consolidée n=5** : représentation spatiale (V2-Z) + Double DQN (V2-W) doublent le mean diff mais ne résolvent PAS le **bottleneck #3 = stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique**. Le finding pratique : **le meilleur agent V2-W existe avant ep 3500, l'entraînement après le détruit sur certains seeds**.
 
-1. **V2-ZY : CNN-LSTM + Double DQN combiné — RECOMMANDÉ** : sous-projet hybride V2-Z + V2-Y + V2-W (toutes les 3 améliorations). Probable franchissement bucket 2 (0.4-0.6) sur les meilleurs seeds. Plus ambitieux (~3-4 commits TDD) mais réuse 100% infra existante.
-2. **Tuning V2-W ciblé pour atteindre critère strict** : `--target-sync-steps 500` (sync target net 2× plus fréquente) sur seeds 0/1 pour pousser bucket 1 au-dessus de 70 %. Coût : 2 runs GPU, peut suffire à atteindre 3/3 ≥ 70 %.
-3. **Mazes plus larges (max_size=15 ou 20)** : test de la translation equivariance du CNN sur des grilles plus grandes. Vrai test de généralisation spatiale. Nécessite re-tune VRAM (FC1 explose en dim).
-4. **Sous-projet B (mémoire persistante cross-session)** du programme V2 officiel : oriente vers autonomie long-terme plutôt que performance sur mazes. Moins prioritaire au vu des findings V2-Z/V2-W consolidés.
+**Prochaines étapes prioritaires (validation V2-W avant nouveaux sous-projets)** :
+
+1. **Test hypothèse ep=3000 sur V2-W seeds 0-4 — RECOMMANDÉ** : capturer le pic V2-W avant collapse. Si seeds 3/4 ep=3000 sont meilleurs que ep=5000, le bottleneck est confirmé "on entraîne trop longtemps". ~50 min GPU.
+2. **Best-checkpoint tracking** : si test #1 validé, implémenter early-stopping ou save-best-model par fenêtre rolling de winrate. Permet de récupérer le pic agent sans risquer le collapse. ~30-50 LOC modif `ConvProceduralDQNRunner` + checkpoint logic.
+3. **Soft target update (Polyak τ=0.005)** : remplacer hard sync 1000 steps par soft update à chaque step. Hypothèse : prévient le target/online drift qui cause le collapse. ~10 LOC modif `_ConvDQNTrainer`.
+4. **V2-ZY CNN+LSTM+Double DQN** : reportable tant que le bottleneck #3 n'est pas adressé. Ajouter la mémoire récurrente sur un agent qui collapse à ep 4000 ne résoudra rien.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
