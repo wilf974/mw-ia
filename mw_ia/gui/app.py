@@ -138,8 +138,13 @@ class MainWindow(QMainWindow):
         if self.thread is not None and self.thread.isRunning():
             return
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        dqn_cfg = DQNConfig(
+            hidden_layers=self.config.dqn.hidden_layers,
+            epsilon_decay_steps=self.config.dqn.epsilon_decay_steps,
+            episodes=self.controls.episodes(),
+        )
         runner = DQNRunner(
-            self.env, self.config.dqn, self.config.training,
+            self.env, dqn_cfg, self.config.training,
             callbacks=RunnerCallbacks(), device=device,
             seed=self.config.training.seed,
         )
@@ -174,7 +179,7 @@ class MainWindow(QMainWindow):
         procedural_dqn_cfg = DQNConfig(
             hidden_layers=(256, 256),
             epsilon_decay_steps=200_000,
-            episodes=self.config.dqn.episodes,
+            episodes=self.controls.episodes(),
         )
         runner = ProceduralDQNRunner(
             env=proc_env, proc_cfg=proc_cfg, dqn_cfg=procedural_dqn_cfg,
@@ -210,7 +215,7 @@ class MainWindow(QMainWindow):
         proc_env = ProceduralGridWorld(cfg=proc_cfg, generator=gen)
         # Defaults V2-Z : ConvDQNConfig() défini avec defaults gagnants
         # (epsilon_decay_steps=200000, conv_channels=(32, 64), fc_hidden=256).
-        cnn_cfg = ConvDQNConfig(episodes=self.config.dqn.episodes)
+        cnn_cfg = ConvDQNConfig(episodes=self.controls.episodes())
         runner = ConvProceduralDQNRunner(
             env=proc_env, proc_cfg=proc_cfg, dqn_cfg=cnn_cfg,
             sched_cfg=SchedulerConfig(), train_cfg=self.config.training,
