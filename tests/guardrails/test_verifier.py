@@ -1,11 +1,12 @@
-"""Tests de verify_formal."""
+"""Tests de verify_formal et verify_or_raise."""
 from __future__ import annotations
 
 import pytest
 
 from mw_ia.guardrails.contracts import VariantSpec
+from mw_ia.guardrails.exceptions import InvariantViolationError
 import mw_ia.guardrails.invariants  # noqa: F401  (peuple le registry)
-from mw_ia.guardrails.verifier import verify_formal
+from mw_ia.guardrails.verifier import verify_formal, verify_or_raise
 
 
 def _spec(**overrides):
@@ -38,3 +39,17 @@ def test_verify_formal_is_deterministic():
     r1 = verify_formal(_spec(gamma=1.0))
     r2 = verify_formal(_spec(gamma=1.0))
     assert {v.invariant_id for v in r1.violations} == {v.invariant_id for v in r2.violations}
+
+
+def test_verify_or_raise_returns_report_on_valid():
+    report = verify_or_raise(_spec())
+    assert report.passed is True
+
+
+def test_verify_or_raise_raises_with_full_report():
+    with pytest.raises(InvariantViolationError) as exc_info:
+        verify_or_raise(_spec(gamma=1.0))
+    err = exc_info.value
+    assert err.report.passed is False
+    ids = {v.invariant_id for v in err.report.violations}
+    assert "I1" in ids
