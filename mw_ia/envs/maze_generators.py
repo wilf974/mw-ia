@@ -112,3 +112,78 @@ class RandomObstaclesGenerator:
             f"density={density:.2f} unreachable after {self.max_attempts} attempts "
             f"(rows={self.rows}, cols={self.cols}, start={self.start}, goal={self.goal})"
         )
+
+
+@dataclass(frozen=True)
+class PerfectMazeGenerator:
+    """Generator de maze parfait via DFS recursive backtracker.
+
+    Maze parfait = un et un seul chemin entre deux cellules. Solvable par
+    construction (pas besoin de BFS-check post-hoc).
+
+    La difficulté ∈ [0,1] interpole la TAILLE entre min_size et max_size.
+    """
+
+    min_size: int = 4
+    max_size: int = 20
+
+    def __post_init__(self) -> None:
+        if self.min_size < 2:
+            raise ValueError(f"min_size doit être >= 2, reçu {self.min_size}")
+        if self.min_size >= self.max_size:
+            raise ValueError(
+                f"min_size ({self.min_size}) doit être < max_size ({self.max_size})"
+            )
+
+    def generate(self, *, seed: int, difficulty: float) -> np.ndarray:
+        difficulty = float(np.clip(difficulty, 0.0, 1.0))
+        size = self.min_size + int(round((self.max_size - self.min_size) * difficulty))
+
+        # Initialement, toutes les cellules sont des obstacles. Le DFS creuse
+        # des couloirs en marquant False (cellule libre).
+        grid = np.ones((size, size), dtype=bool)
+        rng = np.random.default_rng(seed=seed)
+
+        # Carve depuis (0,0). Pour garantir start (0,0) et goal (size-1, size-1)
+        # libres, le DFS classique sur maze sur grid creuse en partant de start.
+        # On ouvre start et goal explicitement à la fin pour cohérence.
+        stack: list[tuple[int, int]] = [(0, 0)]
+        grid[0, 0] = False
+        while stack:
+            r, c = stack[-1]
+            # Voisins non visités à distance 2 (cellule + mur)
+            neighbors: list[tuple[int, int, int, int]] = []
+            for dr, dc in ((-2, 0), (2, 0), (0, -2), (0, 2)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < size and 0 <= nc < size and grid[nr, nc]:
+                    # mur entre (r,c) et (nr,nc) : (r+dr/2, c+dc/2)
+                    wr, wc = r + dr // 2, c + dc // 2
+                    neighbors.append((nr, nc, wr, wc))
+            if not neighbors:
+                stack.pop()
+                continue
+            pick = neighbors[rng.integers(0, len(neighbors))]
+            nr, nc, wr, wc = pick
+            grid[wr, wc] = False  # casser le mur
+            grid[nr, nc] = False  # ouvrir la cellule
+            stack.append((nr, nc))
+
+        # Garantir goal libre ET accessible.
+        # Le DFS creuse uniquement les cellules aux positions paires (coordonnées divisibles
+        # par 2). Pour size paire, goal = (size-1, size-1) est impair/impair et reste fermé
+        # après le DFS. On ouvre goal et on casse un mur vers son voisin pair-pair le plus
+        # proche : (size-2, size-2) → (size-1, size-2) → (size-1, size-1)
+        # ou (size-2, size-2) → (size-2, size-1) → (size-1, size-1).
+        gr, gc = size - 1, size - 1
+        grid[gr, gc] = False  # ouvrir goal
+        # Connecter goal à (gr-1, gc) si (gr-1, gc) est libre, sinon à (gr, gc-1)
+        # puis via le carrefour commun (gr-1, gc-1) → (gr-1, gc) ou (gr, gc-1)
+        # Stratégie simple : ouvrir le mur intermédiaire vers la cellule paire-paire voisine
+        cell_r = (gr // 2) * 2  # cellule logique en ligne : gr ou gr-1 selon parité
+        cell_c = (gc // 2) * 2  # cellule logique en colonne
+        # Ouvrir le corridor de (cell_r, cell_c) à (gr, gc) si pas déjà accessible
+        if grid[cell_r, gc]:   # mur horizontal sur la même colonne que goal
+            grid[cell_r, gc] = False
+        if grid[gr, cell_c]:   # mur vertical sur la même ligne que goal
+            grid[gr, cell_c] = False
+        return grid

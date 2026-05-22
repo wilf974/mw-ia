@@ -123,3 +123,46 @@ def test_random_obstacles_property_solvability(seed: int):
     gen = _gen()
     grid = gen.generate(seed=seed, difficulty=0.5)
     assert maze_bfs_check(grid, start=(0, 0), goal=(9, 9))
+
+
+from mw_ia.envs.maze_generators import PerfectMazeGenerator
+
+
+def test_perfect_maze_size_4_solvable():
+    gen = PerfectMazeGenerator(min_size=4, max_size=20)
+    grid = gen.generate(seed=42, difficulty=0.0)
+    rows, cols = grid.shape
+    assert rows == cols == 4
+    assert maze_bfs_check(grid, start=(0, 0), goal=(rows - 1, cols - 1))
+
+
+def test_perfect_maze_size_20_solvable():
+    gen = PerfectMazeGenerator(min_size=4, max_size=20)
+    grid = gen.generate(seed=42, difficulty=1.0)
+    rows, cols = grid.shape
+    assert rows == cols == 20
+    assert maze_bfs_check(grid, start=(0, 0), goal=(rows - 1, cols - 1))
+
+
+def test_perfect_maze_seed_deterministic():
+    gen = PerfectMazeGenerator(min_size=4, max_size=20)
+    g1 = gen.generate(seed=42, difficulty=0.5)
+    g2 = gen.generate(seed=42, difficulty=0.5)
+    assert np.array_equal(g1, g2)
+
+
+def test_perfect_maze_invalid_size_raises():
+    with pytest.raises(ValueError):
+        PerfectMazeGenerator(min_size=20, max_size=4)  # min > max
+    with pytest.raises(ValueError):
+        PerfectMazeGenerator(min_size=1, max_size=10)  # min < 2
+
+
+@given(seed=st.integers(min_value=0, max_value=10_000))
+@settings(max_examples=30, deadline=None)
+def test_perfect_maze_property_solvability(seed: int):
+    """Property : tout maze parfait est solvable par construction."""
+    gen = PerfectMazeGenerator(min_size=4, max_size=20)
+    grid = gen.generate(seed=seed, difficulty=0.5)
+    rows, cols = grid.shape
+    assert maze_bfs_check(grid, start=(0, 0), goal=(rows - 1, cols - 1))
