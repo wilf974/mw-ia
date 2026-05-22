@@ -158,6 +158,53 @@ pas un theorem prover SMT. Les fichiers `.aether` ne sont donc pas des
 + `@invariant`) exécutées par `mcp__aether__aether_verify`. Une vraie
 vérification universelle (Z3 / Lean / Coq) reste possible mais hors-scope V2-A.
 
+## V2-X — Environnement procédural & curriculum learning (sous-projet livré)
+
+Génération de labyrinthes solvables à chaque épisode + scheduler adaptatif de
+difficulté piloté par le winrate. Fait passer l'agent d'un "résolveur de map
+fixe" à un "résolveur de labyrinthes en général".
+
+### Usage CLI
+
+```bash
+# Mode obstacles aléatoires (densité variable avec la difficulté)
+python scripts/train_dqn_procedural.py --episodes 500 --mode obstacles --device cuda
+
+# Mode maze parfait (taille variable avec la difficulté)
+python scripts/train_dqn_procedural.py --episodes 500 --mode maze --device cuda
+```
+
+### Garantie de solvabilité
+
+Tout maze généré est **garanti solvable** :
+- Mode `obstacles` : check BFS post-hoc, regénère jusqu'à 100 tentatives avant `RuntimeError`.
+- Mode `maze` : DFS recursive backtracker, solvable par construction (quasi-parfait pour tailles paires : goal forcé accessible).
+
+### Curriculum adaptatif
+
+Le scheduler ajuste la difficulté toutes les 50 épisodes :
+- winrate >= 80 % → difficulté monte de 0.05
+- winrate <= 30 % → difficulté descend de 0.05
+- sinon : inchangé
+
+Métriques par bucket de difficulté (5 buckets [0,0.2)..[0.8,1.0]) pour détecter
+l'oubli catastrophique des niveaux faciles (préfigure le sous-projet D).
+
+### GUI
+
+`python scripts/launch_gui.py` puis bouton "Démarrer (procedural)" : la grille
+redessine à chaque épisode, une 5e courbe `difficulty(t)` s'ajoute aux 4 V1, et
+un label "Maze #N, diff=X.XX" suit l'évolution.
+
+### Architecture
+
+- `mw_ia/envs/maze_generators.py` — `maze_bfs_check`, `RandomObstaclesGenerator`, `PerfectMazeGenerator`
+- `mw_ia/envs/procedural_env.py` — `ProceduralGridWorld` + `encode_procedural_observation`
+- `mw_ia/training/scheduler.py` — `AdaptiveDifficultyScheduler`
+- `mw_ia/training/metrics.py` — `DifficultyBucketTracker`
+- `mw_ia/training/runner.py` — `ProceduralDQNRunner`
+- `mw_ia/gui/widgets/difficulty_label.py` — label "Maze #N, diff=X.XX"
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
