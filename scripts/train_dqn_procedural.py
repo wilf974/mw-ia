@@ -26,6 +26,8 @@ def main() -> int:
     parser.add_argument("--mode", choices=("obstacles", "maze"), default="obstacles")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--hidden", type=int, nargs="+", default=[128, 128],
+                        help="Tailles des couches cachées du QNetwork (ex: --hidden 256 256)")
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -40,7 +42,7 @@ def main() -> int:
         gen = PerfectMazeGenerator(min_size=proc_cfg.min_size, max_size=proc_cfg.max_size)
 
     env = ProceduralGridWorld(cfg=proc_cfg, generator=gen)
-    dqn_cfg = DQNConfig(episodes=args.episodes)
+    dqn_cfg = DQNConfig(episodes=args.episodes, hidden_layers=tuple(args.hidden))
     sched_cfg = SchedulerConfig()
     train_cfg = TrainingConfig()
 
