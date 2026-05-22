@@ -66,3 +66,31 @@ def test_double_dqn_can_be_disabled() -> None:
     """double_dqn=False pour reproduire V2-Z baseline."""
     cfg = ConvDQNConfig(double_dqn=False)
     assert cfg.double_dqn is False
+
+
+def test_eval_defaults() -> None:
+    """V2-V defaults : eval activé, 100 ép, seeds 10000-10009, max 200 steps."""
+    cfg = ConvDQNConfig()
+    assert cfg.eval_enabled is True
+    assert cfg.eval_every_episodes == 100
+    assert cfg.eval_seeds == tuple(range(10_000, 10_010))
+    assert cfg.eval_max_steps == 200
+    assert cfg.best_checkpoint_path is None
+
+
+def test_eval_can_be_disabled() -> None:
+    """eval_enabled=False pour reproduire baseline pre-V2-V."""
+    cfg = ConvDQNConfig(eval_enabled=False)
+    assert cfg.eval_enabled is False
+
+
+def test_eval_validation() -> None:
+    """eval_every_episodes ≤ 0 et eval_seeds vide rejetés."""
+    with pytest.raises(ValueError):
+        ConvDQNConfig(eval_every_episodes=0)
+    with pytest.raises(ValueError):
+        ConvDQNConfig(eval_every_episodes=-1)
+    with pytest.raises(ValueError):
+        ConvDQNConfig(eval_seeds=())
+    with pytest.raises(ValueError):
+        ConvDQNConfig(eval_max_steps=0)
