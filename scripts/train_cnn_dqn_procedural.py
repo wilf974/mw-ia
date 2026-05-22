@@ -38,6 +38,13 @@ def main() -> int:
                         help="Périodicité (ép) du scheduler (default V2-X : 200)")
     parser.add_argument("--scheduler-step", type=float, default=0.05,
                         help="Pas de difficulté du scheduler (default V2-X : 0.05)")
+    parser.add_argument(
+        "--double-dqn",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Double DQN (Hasselt 2015) : online sélectionne, target évalue. "
+             "Default V2-W. Utiliser --no-double-dqn pour reproduire V2-Z baseline.",
+    )
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -58,6 +65,7 @@ def main() -> int:
         fc_hidden=args.fc_hidden,
         epsilon_decay_steps=args.epsilon_decay_steps,
         target_sync_steps=args.target_sync_steps,
+        double_dqn=args.double_dqn,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,
