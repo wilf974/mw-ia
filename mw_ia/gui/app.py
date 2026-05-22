@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from mw_ia.config import Config, DQNConfig, ProceduralEnvConfig, SchedulerConfig
+from mw_ia.config import Config, ConvDQNConfig, DQNConfig, ProceduralEnvConfig, SchedulerConfig
 from mw_ia.envs.gridworld import GridWorld
 from mw_ia.envs.maze_generators import RandomObstaclesGenerator
 from mw_ia.envs.procedural_env import ProceduralGridWorld
@@ -25,7 +25,7 @@ from mw_ia.gui.widgets.gridworld_view import GridWorldView
 from mw_ia.gui.widgets.live_plots import LivePlots
 from mw_ia.gui.widgets.log_console import LogConsole
 from mw_ia.gui.widgets.stats_panel import StatsPanel
-from mw_ia.training.runner import DQNRunner, ProceduralDQNRunner, RunnerCallbacks
+from mw_ia.training.runner import ConvProceduralDQNRunner, DQNRunner, ProceduralDQNRunner, RunnerCallbacks
 
 
 class TrainingThread(QThread):
@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
 
         self.controls.start_clicked.connect(self.on_start)
         self.controls.start_procedural_clicked.connect(self.on_start_procedural)
+        self.controls.start_procedural_cnn_clicked.connect(self.on_start_procedural_cnn)
         self.controls.pause_clicked.connect(self.on_pause)
         self.controls.reset_clicked.connect(self.on_reset)
         self.controls.save_clicked.connect(self.on_save)
@@ -189,6 +190,40 @@ class MainWindow(QMainWindow):
         self.thread.log_signal.connect(self.log.append)
         self.thread.finished_signal.connect(self._on_finished)
         # Wiring procedural-spécifique
+        self.thread.maze_changed_signal.connect(self.gridview.on_maze_changed)
+        self.thread.maze_changed_signal.connect(self.difficulty_label.on_maze_changed)
+        self.thread.difficulty_signal.connect(self._on_difficulty)
+        self.controls.set_running(True)
+        self.thread.start()
+
+    @pyqtSlot()
+    def on_start_procedural_cnn(self) -> None:
+        if self.thread is not None and self.thread.isRunning():
+            return
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        proc_cfg = ProceduralEnvConfig(mode="obstacles")
+        gen = RandomObstaclesGenerator(
+            rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
+            start=(0, 0), goal=(proc_cfg.max_rows - 1, proc_cfg.max_cols - 1),
+            min_density=proc_cfg.min_density, max_density=proc_cfg.max_density,
+        )
+        proc_env = ProceduralGridWorld(cfg=proc_cfg, generator=gen)
+        # Defaults V2-Z : ConvDQNConfig() défini avec defaults gagnants
+        # (epsilon_decay_steps=200000, conv_channels=(32, 64), fc_hidden=256).
+        cnn_cfg = ConvDQNConfig(episodes=self.config.dqn.episodes)
+        runner = ConvProceduralDQNRunner(
+            env=proc_env, proc_cfg=proc_cfg, dqn_cfg=cnn_cfg,
+            sched_cfg=SchedulerConfig(), train_cfg=self.config.training,
+            callbacks=RunnerCallbacks(), device=device,
+            seed=self.config.training.seed,
+        )
+        self.thread = TrainingThread(runner)
+        self.thread.step_signal.connect(self._on_step)
+        self.thread.episode_signal.connect(self._on_episode)
+        self.thread.loss_signal.connect(self._on_loss)
+        self.thread.epsilon_signal.connect(self._on_epsilon)
+        self.thread.log_signal.connect(self.log.append)
+        self.thread.finished_signal.connect(self._on_finished)
         self.thread.maze_changed_signal.connect(self.gridview.on_maze_changed)
         self.thread.maze_changed_signal.connect(self.difficulty_label.on_maze_changed)
         self.thread.difficulty_signal.connect(self._on_difficulty)
