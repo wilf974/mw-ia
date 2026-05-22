@@ -292,66 +292,88 @@ python scripts/train_drqn_procedural.py --episodes 5000 --mode obstacles --devic
 3. **`conv_channels=(32, 64)` peut être overkill** : 99% des params dans FC1. Tester `--conv-channels 16 32` voire `8 16` post-livraison.
 4. **Scheduler `update=200` peut être trop patient pour CNN** : à confirmer empiriquement vs `--scheduler-update-interval 100` (intermédiaire entre V2-X 200 et V2-Y 50).
 
-### V2-Z — baseline CNN empirique 5000 ép (2026-05-22)
+### V2-Z — baseline CNN empirique n=3 seeds, 5000 ép GPU (2026-05-22)
 
-**Validation empirique post-livraison** : 1 run GPU 5000 ép obstacles, seed=0, defaults V2-Z (`--conv-channels 32 64 --fc-hidden 256 --epsilon-decay-steps 200000 --scheduler-update-interval 200 --scheduler-step 0.05`).
+**Validation empirique post-livraison consolidée** : 3 runs GPU 5000 ép obstacles, seeds 0/1/2, defaults V2-Z (`--conv-channels 32 64 --fc-hidden 256 --epsilon-decay-steps 200000 --scheduler-update-interval 200 --scheduler-step 0.05`).
 
-**Résultat consolidé** :
-- **Final winrate : 54 % @ diff=0.10** (bucket 0, 54/100 derniers épisodes)
-- ε final : 0.050 (decay saturé dès ~ep 4000)
-- Bucket 1+ : vide (le tracker route sur `min(4, int(diff*5))` donc tout reste en bucket 0 jusqu'à diff≥0.20)
+**Résultats par seed** :
 
-**Trajectoire scheduler** :
+| Seed | Final winrate | Final diff | Bucket 0 (0.0-0.2) | **Bucket 1 (0.2-0.4)** |
+|---|---|---|---|---|
+| 0 | 54 % | 0.10 | 54 % | — vide (worst-case) |
+| **1** | **65 %** | **0.25** | **83 %** | **65 %** ✓ rempli |
+| **2** | **51 %** | **0.35** | **90 %** | **51 %** ✓ rempli |
 
-| Étape | Ép | Action scheduler | Winrate au moment du switch |
-|---|---|---|---|
-| 1 | 400 | diff 0.00 → 0.05 (up) | 96 % |
-| 2 | 800 | diff 0.05 → 0.10 (up) | 85 % |
-| 3 | 800-5000 | Stagne à diff=0.10 | Oscille 44-54 %, ni ≥80 % ni ≤30 % |
+**Statistiques n=3** :
+- Diff max atteinte : moyenne **0.23**, min 0.10, max 0.35, écart-type ±0.13 (variance haute)
+- Bucket 1 rempli : **2/3 seeds** (66 %)
+- Critère succès V2-X strict "bucket 1 ≥ 70 %" : non atteint sur aucun seed (max 65 %)
 
-**Comparaison inter-archis (mêmes env, mêmes 5000 ép, recette CLI gagnante de chaque)** :
+**Diagnostic révisé (n=3 corrige n=1)** :
 
-| Variante | Final winrate | Final diff | Franchit diff=0.05 → 0.10 ? |
-|---|---|---|---|
-| V2-X MLP `(256, 256)` (2000 ép) | 72 % | 0.05 | ❌ plafonné |
-| V2-Y LSTM `fc=256, lstm=128` (5000 ép) | 95 % | 0.05 | ❌ plafonné (meilleur winrate au même palier) |
-| **V2-Z CNN `(32, 64)` (5000 ép)** | **54 %** | **0.10** | **✅ premier sous-projet à franchir** |
+L'hypothèse initiale post-seed=0 ("CNN plafonne à diff=0.10") était **erronée**. Les seeds 1 et 2 démontrent que :
 
-**Trajectoire 500 ép preview (même run, début de la courbe)** :
-- ep 0-100 : 20 → 35 % @ diff=0.00 (exploration chaotique)
-- ep 100-400 : 35 → 96 % @ diff=0.00 (apprentissage rapide)
-- ep 400 : scheduler tire diff=0.05 (winrate 96 % > seuil 80 %)
-- ep 500 : 78 % @ diff=0.05 (déjà comparable à V2-X 72 % @ 2000 ép — **4× plus sample-efficient**)
+1. **CNN ne plafonne PAS à diff=0.10** — il atteint 0.25-0.35 sur les bons seeds
+2. **Le seed 0 était un worst-case** : convergence vers un optimum local sub-optimal
+3. **Le vrai problème est la variance de convergence**, pas un plafond architectural
 
 **Finding architectural consolidé** :
 
-> Le bottleneck principal V2-X/V2-Y n'était PAS la mémoire mais **la représentation spatiale**. V2-X (MLP 1D) et V2-Y (LSTM sur 1D) plafonnent au même palier de difficulté. V2-Z (CNN 2D) franchit ce palier avec moins d'épisodes pour atteindre le winrate équivalent. La perception spatiale (translation equivariance + localité des kernels) débloque la généralisation curriculum.
+> Le bottleneck principal V2-X/V2-Y était **la représentation spatiale**. V2-X (MLP 1D, n=1, diff max 0.05) et V2-Y (LSTM sur 1D, n=2, diff max 0.05) plafonnent au même palier. V2-Z (CNN 2D, n=3, diff max 0.10/0.25/0.35) **franchit qualitativement ce palier** : la perception spatiale (translation equivariance + localité des kernels) débloque la généralisation curriculum.
 
-**Second bottleneck identifié (à diff=0.10)** : V2-Z stagne à 54 % winrate à diff=0.10. Symptômes :
-- Policy oscille 44-54 % sans converger
-- Scheduler bloqué (ni up ni down)
-- ε saturé à 0.05 mais aucun progrès marginal
-- Pattern classique de **surestimation Q-values DQN** (Hasselt 2015) — agent fait des choix sur-optimistes que la réalité ne soutient pas
+**Second bottleneck identifié (n=3 affine n=1)** :
 
-**Recommandation prochaine session — V2-W Double DQN sur CNN** :
+> Sur les seeds qui réussissent à franchir, le CNN stagne autour de **51-65 % winrate au bucket 1** — proche du seuil 70 % du critère succès V2-X mais pas atteint. Le seed 0 reste bloqué à diff=0.10. Symptômes inter-seeds :
+> - Variance énorme dans la diff max atteinte (0.10 vs 0.35, ratio 3.5×)
+> - Oscillation persistante (winrate 44-65 % au plafond, scheduler ni up ni down)
+> - Pattern classique de **surestimation Q-values DQN** (Hasselt 2015) + **sensibilité aux conditions initiales** (init poids, ordre du replay, exploration warmup)
 
-Modifier `_ConvDQNTrainer.step()` (~30 LOC) pour découpler sélection d'action (online net) et évaluation (target net) :
+**Trajectoire seed 0 (worst-case, pour référence)** :
+
+| Étape | Ép | Action scheduler | Winrate au switch |
+|---|---|---|---|
+| 1 | 400 | diff 0.00 → 0.05 (up) | 96 % |
+| 2 | 800 | diff 0.05 → 0.10 (up) | 85 % |
+| 3 | 800-5000 | Stagne à diff=0.10 | Oscille 44-54 % |
+
+**Trajectoire 500 ép preview (seed 0, début de la courbe — non corrigé par n=3)** :
+- ep 0-100 : 20 → 35 % @ diff=0.00 (exploration chaotique)
+- ep 400 : scheduler tire diff=0.05 (winrate 96 %)
+- ep 500 : 78 % @ diff=0.05 (déjà comparable à V2-X 72 % @ 2000 ép — **4× plus sample-efficient**)
+
+**Comparaison inter-archis consolidée (multi-seed quand dispo)** :
+
+| Variante | n seeds | Diff max (min / max) | Bucket 1 rempli ? | Plafond |
+|---|---|---|---|---|
+| V2-X MLP `(256, 256)` (2000 ép) | 1+ | 0.05 / 0.05 | ❌ jamais | architectural ferme |
+| V2-Y LSTM `fc=256, lstm=128` (5000 ép) | 2 | 0.05 / 0.05 | ❌ jamais | architectural ferme (meilleur winrate au même palier) |
+| **V2-Z CNN `(32, 64)` (5000 ép)** | **3** | **0.10 / 0.35** | **2/3 seeds** | **instabilité de convergence (pas architectural)** |
+
+**Implications pour V2-W Double DQN** :
+
+L'hypothèse précédente "Double DQN réduit la surestimation et débloque le plafond" se précise avec les données n=3 :
+
+1. **Réduction de variance attendue** : Double DQN découple sélection/évaluation, ce qui stabilise empiriquement les Q-values. Effet attendu sur n seeds : variance inter-seeds plus faible (idéalement écart-type < ±0.05 sur la diff max au lieu de ±0.13 actuel)
+2. **Bucket 1 attendu ≥ 70 %** : les 65 %/51 % actuels suggèrent qu'il y a du headroom — réduire la sur-confiance Q devrait pousser le winrate vers les 70-80 %
+3. **Possiblement bucket 2 (0.4-0.6) débloqué** sur les meilleurs seeds — à confirmer
+4. **Seed 0 worst-case** devrait disparaître : la sensibilité aux conditions initiales s'atténue avec un objectif d'apprentissage plus stable
+
+Modif technique V2-W (~30 LOC, parallèle à `_ConvDQNTrainer`) :
 
 ```python
-# Avant (V2-Z) :
+# Avant (V2-Z _ConvDQNTrainer.step) :
 q_next = self.target(next_states).max(dim=1).values
 
-# Après (V2-W) :
+# Après (V2-W _DoubleConvDQNTrainer.step) :
 next_actions = self.online(next_states).argmax(dim=1)        # sélection : online
 q_next = self.target(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)  # éval : target
 ```
 
-Hypothèse V2-W : réduire la surestimation devrait permettre au CNN de franchir diff=0.10 → 0.15+ et idéalement remplir le bucket 1 (0.2-0.4) à ≥70 %, atteignant ainsi le critère succès strict spec V2-X.
-
-**Reproductibilité à valider** : 1 seul run avec seed=0 — pour confirmer le finding, lancer 2-3 runs avec seeds différentes (`--seed 1`, `--seed 2`) et observer si :
-1. La transition diff=0.05 → 0.10 a toujours lieu autour de ep 800-1500
-2. Le plafond à diff=0.10 reste autour de 50-60 % winrate
-3. La variance inter-seeds est sous ±5 pp (cf. pattern V2-Y)
+**Méthodologie V2-W recommandée** :
+1. Brainstorm + spec + plan (cycle complet superpowers)
+2. Implémenter `DoubleConvDQNConfig` (flag `double_dqn: bool = True` simple, ou nouveau dataclass) + `_DoubleConvDQNTrainer` + `DoubleConvDQNAgent` (réutilise ConvQNetwork inchangé)
+3. **Benchmark direct V2-Z vs V2-W** : n=3 seeds pour chaque, mêmes hyperparams, mêmes 5000 ép → table comparative directe
+4. Si V2-W → diff_max ≥ 0.40 stable sur n=3, c'est le finding "publishable" complet : représentation spatiale ET stabilité Q = combo nécessaire
 
 ---
 
