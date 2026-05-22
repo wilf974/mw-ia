@@ -205,6 +205,44 @@ un label "Maze #N, diff=X.XX" suit l'évolution.
 - `mw_ia/training/runner.py` — `ProceduralDQNRunner`
 - `mw_ia/gui/widgets/difficulty_label.py` — label "Maze #N, diff=X.XX"
 
+## V2-Y — Deep Recurrent Q-Network (LSTM) (sous-projet livré)
+
+Mémoire neuronale temporelle pour franchir le plafond architectural V2-X
+(DQN feedforward plafonne à ~80% winrate à diff=0.10). Le LSTM permet à
+l'agent de se souvenir des dead-ends récents dans le maze courant.
+
+### Usage CLI
+
+```bash
+# Mode obstacles, recette V2-X gagnante héritée par défaut
+python scripts/train_drqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+
+# Mode maze parfait
+python scripts/train_drqn_procedural.py --episodes 5000 --mode maze --device cuda
+```
+
+### Critère de succès
+
+Bucket 1 du tracker (difficulté 0.20-0.40) doit afficher **winrate ≥ 70%** en
+fin d'entraînement. Comparaison directe avec V2-X (DQN feedforward) qui plafonne
+au bucket 0 (0.0-0.20).
+
+### Architecture
+
+- `mw_ia/neural/recurrent.py` — `RecurrentQNetwork` (Linear → ReLU → LSTM → Linear)
+- `mw_ia/neural/sequence_buffer.py` — `SequenceReplayBuffer` (buffer de trajectoires complètes, sample seq_len avec padding+mask)
+- `mw_ia/neural/recurrent_trainer.py` — `RecurrentDQNTrainer` (BPTT 32 steps, Huber masquée, AMP + grad clip)
+- `mw_ia/agents/recurrent_dqn.py` — `RecurrentDQNAgent` (hidden state runtime maintenu, reset par épisode)
+- `mw_ia/training/runner.py::RecurrentProceduralDQNRunner` — extension V2-Y
+
+### Algorithme
+
+DRQN simple (Hausknecht & Stone 2015) : hidden state zero-init au début de
+chaque séquence d'entraînement (pas de burn-in en V2-Y MVP). Hidden state
+runtime maintenu entre `act()` consécutifs dans un épisode, reset à chaque
+nouvel épisode (pas de mémoire cross-épisodes — cohérent avec le but
+"résoudre le maze courant", pas "se souvenir des mazes précédents").
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
