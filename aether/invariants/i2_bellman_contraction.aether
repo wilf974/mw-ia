@@ -1,0 +1,21 @@
+; I2 — bellman_contraction
+;
+; L'operateur de Bellman optimal T est gamma-Lipschitz en norme infinie :
+;   ||TQ - TQ'||∞ <= gamma * ||Q - Q'||∞
+;
+; Formalisation : la borne de contraction (gamma * dQ) reste bornee par dQ
+; pour tout gamma dans [0,1] et dQ >= 0.
+;
+; Implementation Python : mw_ia/guardrails/invariants.py::bellman_contraction
+; (50 paires Q,Q' aleatoires sur mini-MDP S=3 A=2).
+;
+; Validation par exemples : 5 cas couvrant gamma ∈ {0.0, 0.5, 0.99, 1.0}.
+
+(@intent "Predicat I2 : bellman_contraction — la borne γ*dQ reste ≤ dQ pour gamma ∈ [0,1], dQ ≥ 0")
+(@invariant (<= result dq))
+(@example 0.99 10.0 9.9)
+(@example 0.5 5.0 2.5)
+(@example 0.0 5.0 0.0)
+(@example 0.5 0.0 0.0)
+(@example 1.0 7.5 7.5)
+(fn bellman_contraction_bound ((gamma num) (dq num)) num (* gamma dq))
