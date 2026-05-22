@@ -140,6 +140,23 @@ python scripts/train_dqn_procedural.py \
 
 **Comportement adaptatif vérifié** : avec la recette gagnante, le scheduler monte à diff 0.10 (winrate ≥ 80%), l'agent struggle, scheduler redescend à 0.05 (winrate ≤ 30%), agent réapprend, retest. Mécanisme PCG-RL canonique opérationnel.
 
+### V2-X — fix scheduler consolidé (2026-05-22, post-GUI-fix)
+
+Suite au fix GUI procedural (commit `1a040c6`), 3 itérations de tuning scheduler sur V2-X 2000 ép GPU avec recette gagnante :
+
+| Iter | `update_interval` | `step` | Final winrate | Final diff | Verdict |
+|---|---|---|---|---|---|
+| 1 (V2-X initial) | 50 | 0.05 | ~47 % | 0.10 | Scheduler trop agressif, oscille rapidement, décroche à 0.10 |
+| 2 (`469b7fc`) | **200** | 0.05 | **72 %** | 0.05 | Scheduler patient, oscille 0.05 ↔ 0.10 cycle ~400 ép, stable au plus bas palier |
+| 3 (`300fe7d` → reverté) | 200 | 0.025 | 54 % ⬇ | 0.05 | Step trop fin = 3 paliers oscillation 0.025↔0.05↔0.075, instable |
+
+**Default V2-X consolidé** (commit `[revert]`) :
+- `SchedulerConfig.update_interval = 200` (vs 50 original)
+- `SchedulerConfig.step = 0.05` (inchangé après expérience iter 3)
+- `step = 0.025` reste **option expérimentale** pour V2-Y / CNN / Double DQN qui pourraient bénéficier d'un palier intermédiaire 0.075.
+
+**Plafond V2-X consolidé** : le DQN feedforward (même avec `hidden=(256,256)`, `epsilon_decay_steps=200000`, `min_density=0.0`, scheduler `update_interval=200`, `step=0.05`) **plafonne à diff ≈ 0.05** (5 obstacles sur 10×10), pas 0.10 comme initialement perçu. Le palier 0.075 a été atteint en iter 3 mais l'agent décroche immédiatement. Au-delà nécessite changement d'archi : **V2-Y LSTM (livré), Double DQN, CNN, ou Dueling**.
+
 ### V2-Y — état final des phases (livraison 2026-05-22)
 
 | Phase | Tâches | Statut | Tests | Commits |
