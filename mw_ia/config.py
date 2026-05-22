@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -76,3 +77,65 @@ class Config:
 
 
 DEFAULT = Config()
+
+
+@dataclass(frozen=True)
+class ProceduralEnvConfig:
+    """Configuration de l'environnement procédural V2-X."""
+
+    mode: Literal["obstacles", "maze"]
+    max_rows: int = 10
+    max_cols: int = 10
+    min_density: float = 0.10           # mode obstacles uniquement
+    max_density: float = 0.50
+    min_size: int = 4                   # mode maze uniquement
+    max_size: int = 20
+    max_attempts_bfs: int = 100         # mode obstacles : tentatives avant RuntimeError
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("obstacles", "maze"):
+            raise ValueError(f"mode doit être 'obstacles' ou 'maze', reçu {self.mode!r}")
+        if not (0.0 <= self.min_density <= self.max_density <= 1.0):
+            raise ValueError(
+                f"densités invalides : min_density={self.min_density}, "
+                f"max_density={self.max_density}"
+            )
+        if not (2 <= self.min_size < self.max_size):
+            raise ValueError(
+                f"tailles invalides : min_size={self.min_size}, max_size={self.max_size}"
+            )
+        if self.max_attempts_bfs <= 0:
+            raise ValueError(f"max_attempts_bfs doit être > 0, reçu {self.max_attempts_bfs}")
+
+
+@dataclass(frozen=True)
+class SchedulerConfig:
+    """Configuration du scheduler adaptatif de difficulté."""
+
+    initial_difficulty: float = 0.0
+    min_difficulty: float = 0.0
+    max_difficulty: float = 1.0
+    up_threshold: float = 0.80
+    down_threshold: float = 0.30
+    step: float = 0.05
+    update_interval: int = 50           # épisodes
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.min_difficulty <= self.max_difficulty <= 1.0):
+            raise ValueError(
+                f"difficultés invalides : min={self.min_difficulty}, max={self.max_difficulty}"
+            )
+        if not (self.min_difficulty <= self.initial_difficulty <= self.max_difficulty):
+            raise ValueError(
+                f"initial_difficulty={self.initial_difficulty} hors "
+                f"[{self.min_difficulty}, {self.max_difficulty}]"
+            )
+        if self.up_threshold <= self.down_threshold:
+            raise ValueError(
+                f"up_threshold ({self.up_threshold}) doit être > "
+                f"down_threshold ({self.down_threshold})"
+            )
+        if not (0.0 < self.step <= 1.0):
+            raise ValueError(f"step doit être ∈ (0,1], reçu {self.step}")
+        if self.update_interval <= 0:
+            raise ValueError(f"update_interval doit être > 0, reçu {self.update_interval}")
