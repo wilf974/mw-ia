@@ -1,0 +1,29 @@
+; I6 — replay_buffer_capacity
+;
+; Deux proprietes structurelles du buffer circulaire :
+;   (a) Index : (idx + 1) mod capacity reste < capacity
+;   (b) Taille : min(pushes, capacity) <= capacity meme apres debordement
+;
+; Ces deux invariants formalisent que le ReplayBuffer ne deborde JAMAIS,
+; et que son index modulo reste toujours valide.
+;
+; Implementation Python : mw_ia/guardrails/invariants.py::replay_buffer_capacity
+; (3 * capacity pushes via mw_ia/neural/replay_buffer.py::ReplayBuffer).
+
+(@intent "I6a : circular_next_idx — (idx + 1) mod capacity reste < capacity")
+(@invariant (< result capacity))
+(@example 0 100 1)
+(@example 99 100 0)
+(@example 50 100 51)
+(@example 0 1 0)
+(@example 999 1000 0)
+(fn circular_next_idx ((idx num) (capacity num)) num (% (+ idx 1) capacity))
+
+(@intent "I6b : buffer_size — min(pushes, capacity) <= capacity")
+(@invariant (<= result capacity))
+(@example 5 100 5)
+(@example 100 100 100)
+(@example 150 100 100)
+(@example 0 100 0)
+(@example 1000000 1000 1000)
+(fn buffer_size ((pushes num) (capacity num)) num (min pushes capacity))
