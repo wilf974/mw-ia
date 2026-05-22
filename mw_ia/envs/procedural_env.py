@@ -116,3 +116,51 @@ def encode_procedural_observation(
     obs[n_cells:] = padded.flatten()
 
     return obs
+
+
+def encode_procedural_observation_2d(
+    *,
+    state: tuple[int, int],
+    grid: np.ndarray,
+    goal: tuple[int, int],
+    max_rows: int,
+    max_cols: int,
+) -> np.ndarray:
+    """Encode l'observation procédural pour ConvQNetwork (V2-Z).
+
+    Format : tensor 3D shape (3, max_rows, max_cols) float32 :
+    - canal 0 : position agent one-hot (un seul 1 en (row, col))
+    - canal 1 : obstacles (grid.astype(float32))
+    - canal 2 : goal one-hot (un seul 1 en (goal_r, goal_c))
+
+    Pour les mazes plus petits que max_rows × max_cols, la grille est placée
+    top-left, les cellules hors maze restent à zéro sur les 3 canaux (cellules
+    libres, pas d'obstacle, pas de goal). L'agent CNN voit des bordures
+    artificielles qu'il apprend à ignorer.
+
+    Args:
+        state: position (row, col) de l'agent.
+        grid: maze actuel (rows ≤ max_rows, cols ≤ max_cols), True = obstacle.
+        goal: position (goal_r, goal_c) du goal dans max_rows × max_cols.
+        max_rows: nombre de rangées max (dim du ConvQNetwork).
+        max_cols: nombre de colonnes max.
+
+    Returns:
+        np.ndarray[float32] de shape (3, max_rows, max_cols).
+    """
+    rows, cols = grid.shape
+    assert rows <= max_rows and cols <= max_cols, (
+        f"grid {grid.shape} > max ({max_rows}, {max_cols})"
+    )
+    assert 0 <= state[0] < rows and 0 <= state[1] < cols, (
+        f"state {state} hors grid {grid.shape}"
+    )
+    assert 0 <= goal[0] < max_rows and 0 <= goal[1] < max_cols, (
+        f"goal {goal} hors max ({max_rows}, {max_cols})"
+    )
+
+    obs = np.zeros((3, max_rows, max_cols), dtype=np.float32)
+    obs[0, state[0], state[1]] = 1.0
+    obs[1, :rows, :cols] = grid.astype(np.float32)
+    obs[2, goal[0], goal[1]] = 1.0
+    return obs
