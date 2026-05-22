@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
+import mw_ia.guardrails.invariants  # noqa: F401  (peuple le registry)
 from mw_ia.guardrails.contracts import VariantSpec
 from mw_ia.guardrails.exceptions import InvariantViolationError
-import mw_ia.guardrails.invariants  # noqa: F401  (peuple le registry)
 from mw_ia.guardrails.verifier import verify_formal, verify_or_raise
 
 
