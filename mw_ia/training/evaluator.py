@@ -54,7 +54,7 @@ class PeriodicEvaluator:
 
     def evaluate(
         self, agent: _ActableAgent, difficulty: float,
-    ) -> dict[str, float]:
+    ) -> dict[str, float | int]:
         """Lance len(eval_seeds) rollouts greedy. Retourne metrics dict.
 
         Args:
