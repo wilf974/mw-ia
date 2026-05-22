@@ -77,9 +77,14 @@ class RandomObstaclesGenerator:
     max_attempts: int = 100
 
     def __post_init__(self) -> None:
-        assert self.rows > 0 and self.cols > 0
-        assert 0 <= self.start[0] < self.rows and 0 <= self.start[1] < self.cols
-        assert 0 <= self.goal[0] < self.rows and 0 <= self.goal[1] < self.cols
+        if self.rows <= 0 or self.cols <= 0:
+            raise ValueError(
+                f"rows et cols doivent être > 0, reçu rows={self.rows}, cols={self.cols}"
+            )
+        if not (0 <= self.start[0] < self.rows and 0 <= self.start[1] < self.cols):
+            raise ValueError(f"start {self.start} hors grille {self.rows}x{self.cols}")
+        if not (0 <= self.goal[0] < self.rows and 0 <= self.goal[1] < self.cols):
+            raise ValueError(f"goal {self.goal} hors grille {self.rows}x{self.cols}")
         if not (0.0 <= self.min_density <= self.max_density <= 1.0):
             raise ValueError(
                 f"densités invalides : min={self.min_density}, max={self.max_density}"
@@ -116,10 +121,18 @@ class RandomObstaclesGenerator:
 
 @dataclass(frozen=True)
 class PerfectMazeGenerator:
-    """Generator de maze parfait via DFS recursive backtracker.
+    """Generator de maze quasi-parfait via DFS recursive backtracker.
 
-    Maze parfait = un et un seul chemin entre deux cellules. Solvable par
-    construction (pas besoin de BFS-check post-hoc).
+    Un vrai maze parfait a un et un seul chemin entre deux cellules. Le DFS
+    classique creuse uniquement les cellules aux coordonnées paires ; pour
+    des tailles paires (4, 6, ..., 20), goal=(size-1, size-1) est en position
+    impaire/impaire et n'est pas dans la sous-grille DFS. On force son
+    accessibilité en ouvrant explicitement les murs intermédiaires vers le
+    voisin pair-pair le plus proche.
+
+    Conséquence : pour size paire, goal est accessible par 1 ou 2 chemins
+    additionnels sur ses dernières cellules (quasi-parfait localement). La
+    solvabilité reste garantie par construction (pas besoin de BFS-check).
 
     La difficulté ∈ [0,1] interpole la TAILLE entre min_size et max_size.
     """

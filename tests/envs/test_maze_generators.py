@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
-from mw_ia.envs.maze_generators import maze_bfs_check
+from mw_ia.envs.maze_generators import (
+    PerfectMazeGenerator,
+    RandomObstaclesGenerator,
+    maze_bfs_check,
+)
 
 
 def test_bfs_trivial_empty_grid():
@@ -48,12 +54,6 @@ def test_bfs_start_out_of_grid_raises():
     grid = np.zeros((5, 5), dtype=bool)
     with pytest.raises(AssertionError):
         maze_bfs_check(grid, start=(-1, 0), goal=(4, 4))
-
-
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from mw_ia.envs.maze_generators import RandomObstaclesGenerator
 
 
 def _gen() -> RandomObstaclesGenerator:
@@ -123,9 +123,6 @@ def test_random_obstacles_property_solvability(seed: int):
     gen = _gen()
     grid = gen.generate(seed=seed, difficulty=0.5)
     assert maze_bfs_check(grid, start=(0, 0), goal=(9, 9))
-
-
-from mw_ia.envs.maze_generators import PerfectMazeGenerator
 
 
 def test_perfect_maze_size_4_solvable():
