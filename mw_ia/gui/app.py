@@ -34,6 +34,7 @@ class TrainingThread(QThread):
     epsilon_signal = pyqtSignal(int, float)
     log_signal = pyqtSignal(str, str)
     finished_signal = pyqtSignal()
+    maze_changed_signal = pyqtSignal(object, int, float)
 
     def __init__(self, runner: DQNRunner) -> None:
         super().__init__()
@@ -44,6 +45,7 @@ class TrainingThread(QThread):
             on_loss=self._on_loss,
             on_epsilon=self._on_epsilon,
             on_log=self._on_log,
+            on_maze_changed=self._on_maze_changed,
         )
 
     def _on_step(self, *, state, action, reward, next_state):
@@ -60,6 +62,9 @@ class TrainingThread(QThread):
 
     def _on_log(self, level: str, msg: str) -> None:
         self.log_signal.emit(level, msg)
+
+    def _on_maze_changed(self, *, maze, episode_id, difficulty):
+        self.maze_changed_signal.emit(maze, int(episode_id), float(difficulty))
 
     def run(self) -> None:
         self.runner.run()
@@ -127,6 +132,7 @@ class MainWindow(QMainWindow):
         self.thread.epsilon_signal.connect(self._on_epsilon)
         self.thread.log_signal.connect(self.log.append)
         self.thread.finished_signal.connect(self._on_finished)
+        self.thread.maze_changed_signal.connect(self.gridview.on_maze_changed)
         self.controls.set_running(True)
         self.thread.start()
 

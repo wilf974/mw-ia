@@ -1,7 +1,8 @@
 """Affichage animé du GridWorld via QGraphicsScene."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QSize, Qt
+import numpy as np
+from PyQt6.QtCore import QSize, Qt, pyqtSlot
 from PyQt6.QtGui import QBrush, QColor, QPen
 from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView
 
@@ -37,12 +38,14 @@ class GridWorldView(QGraphicsView):
                 self._scene.addRect(x, y, _CELL, _CELL, pen, QBrush(QColor(THEME.bg_alt)))
         ob_brush = QBrush(QColor(THEME.obstacle))
         for r, c in self.env.cfg.obstacles:
-            self._scene.addRect(c * _CELL, r * _CELL, _CELL, _CELL, pen, ob_brush)
+            item = self._scene.addRect(c * _CELL, r * _CELL, _CELL, _CELL, pen, ob_brush)
+            item.setData(0, "obstacle")
         gr, gc = self.env.cfg.goal
-        self._scene.addRect(
+        goal_item = self._scene.addRect(
             gc * _CELL + 4, gr * _CELL + 4, _CELL - 8, _CELL - 8,
             QPen(QColor(THEME.goal)), QBrush(QColor(THEME.goal)),
         )
+        goal_item.setData(0, "goal")
 
     def _draw_agent(self) -> None:
         r, c = self.env.state
@@ -78,6 +81,44 @@ class GridWorldView(QGraphicsView):
             if it.data(0) == "trail":
                 self._scene.removeItem(it)
         self._draw_agent()
+
+    @pyqtSlot(object, int, float)
+    def on_maze_changed(self, maze: np.ndarray, episode_id: int, difficulty: float) -> None:
+        """Slot Qt — redessine obstacles + goal à partir d'un nouveau maze.
+
+        Args:
+            maze: np.ndarray[bool] shape (rows, cols), True = obstacle.
+            episode_id: numéro d'épisode (info, pas utilisé pour le draw).
+            difficulty: difficulté courante (info, pas utilisé).
+        """
+        # Effacer obstacles + goal précédents
+        for it in list(self._scene.items()):
+            if it.data(0) in ("obstacle", "goal"):
+                self._scene.removeItem(it)
+        # Redessiner les obstacles
+        pen = QPen(QColor(THEME.grid_line))
+        pen.setWidth(1)
+        ob_brush = QBrush(QColor(THEME.obstacle))
+        rows, cols = maze.shape
+        for r in range(rows):
+            for c in range(cols):
+                if maze[r, c]:
+                    item = self._scene.addRect(
+                        c * _CELL, r * _CELL, _CELL, _CELL, pen, ob_brush,
+                    )
+                    item.setData(0, "obstacle")
+        # Redessiner le goal (toujours coin opposé)
+        gr, gc = rows - 1, cols - 1
+        goal_item = self._scene.addRect(
+            gc * _CELL + 4, gr * _CELL + 4, _CELL - 8, _CELL - 8,
+            QPen(QColor(THEME.goal)), QBrush(QColor(THEME.goal)),
+        )
+        goal_item.setData(0, "goal")
+        # Effacer trail
+        self._trail.clear()
+        for it in list(self._scene.items()):
+            if it.data(0) == "trail":
+                self._scene.removeItem(it)
 
     def sizeHint(self) -> QSize:
         return QSize(self.env.cfg.cols * _CELL + 4, self.env.cfg.rows * _CELL + 4)
