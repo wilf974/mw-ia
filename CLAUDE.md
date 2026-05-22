@@ -535,10 +535,18 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 ### Reprise par défaut — attaquer un nouveau sous-projet
 
-V2-A, V2-X et V2-Y étant terminés, la **suite naturelle** est :
-- soit **valider V2-Y avec un grand entraînement** (5000 ép sur RTX 3060) — voir si le LSTM franchit le plafond V2-X (bucket 1 winrate ≥ 70 % à diff 0.20-0.40) ;
-- soit le **sous-projet B (mémoire persistante cross-session)** — RVF, agent qui se souvient d'une session à l'autre ;
-- soit une **autre évolution roadmap** (CNN perception visuelle roadmap #2, personnalités d'IA roadmap #3, multi-objectifs roadmap #4, visualisation neuronale GUI roadmap #6, Double DQN roadmap #7…).
+V2-A, V2-X et V2-Y étant terminés ET la baseline V2-Y validée empiriquement (95% @ diff 0.05, reproductible), la **suite naturelle est CNN ou Double DQN** :
+
+**Diagnostic empirique consolidé de fin de session 2026-05-22** :
+> Le bottleneck actuel n'est PLUS la mémoire (LSTM testé, plafond identique). C'est la **représentation spatiale** (`grid_flatten` dim 100 ignore la structure 2D) + **Q-values instables** (target net DQN classique). V2-Y bat V2-X en qualité de politique au même palier, mais pas en capacité de généralisation curriculum.
+
+**Prochaine étape probable** (priorité à débrainstormer en session fraîche) :
+
+1. **V2-Z : CNN perception spatiale (roadmap #2) — recommandé** : remplacer `concat(position_one_hot, grid_flatten)` par un input 2D `(channels, rows, cols)` traité par une Conv2D. Apprend les motifs locaux (dead-ends, couloirs, intersections) avec translation equivariance, beaucoup moins de paramètres. Cible : franchir diff 0.05 vers 0.20+.
+2. **V2-W : Double DQN (roadmap #7)** : ~30 LOC modif `DQNTrainer.step()` pour découpler sélection d'action (online net) et évaluation (target net). Réduit la surestimation Q-values, particulièrement utile pour V2-Y LSTM instable.
+3. **Combinaison CNN + Double DQN** : sous-projet plus ambitieux mais probablement nécessaire pour vraiment franchir le plafond.
+
+Le **sous-projet B (mémoire persistante cross-session)** du programme V2 officiel reste viable mais est plus "autonomie long-terme" que "résoudre mazes mieux" — moins prioritaire au vu du finding bottleneck spatial.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
