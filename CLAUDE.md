@@ -15,22 +15,25 @@
 
 ---
 
-## État au handoff (2026-05-22 → V2-A LIVRÉ, attaquer sous-projet B ou évolution roadmap)
+## État au handoff (2026-05-22 → V2-A + V2-X LIVRÉS, attaquer sous-projet B ou évolution roadmap restante)
 
 **V1** livrée et taguée `v0.1.0` (2026-05-21). DQN converge à 99 % winrate Expert sur RTX 3060 en ~19 s.
 
 **V2-A — Aether guardrails : 9 phases / 33 tâches LIVRÉES.** Tag `v0.2.0-a` posé. 95 tests pytest verts (52 V1 + 43 V2-A). ~24 commits V2-A sur `main`.
 
-### Sous-projet V2-A — décomposition du programme V2
+**V2-X — Procedural environment & curriculum learning : 13 phases / 16 tâches LIVRÉES.** Tag `v0.2.0-x` posé. **148 tests pytest verts** (95 baseline + 53 V2-X). 17 commits V2-X sur `main`. Smoke E2E maze 50 ép → winrate 94 % et scheduler s'est déclenché (diff 0 → 0.05 au seuil winrate ≥ 80 %) — curriculum opérationnel.
 
-La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels. **A est terminé** ; **B** est le prochain par défaut.
+### Sous-projet V2-A et V2-X — décomposition du programme V2 + évolutions
+
+La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (A-F). En parallèle, des évolutions roadmap (`V2-X`, `V2-Y`...) sont livrables indépendamment quand naturel. **A et X sont terminés** ; **B** reste le prochain sous-projet "auto-amélioration" naturel.
 
 | # | Sous-projet | Statut |
 |---|---|---|
 | **A** | Aether guardrails | ✅ Livré (tag `v0.2.0-a`) |
+| **X** | Environnement procédural + curriculum | ✅ Livré (tag `v0.2.0-x`) |
 | **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
 | C | Évaluateur self-supervisé | Pas commencé |
-| D | Continual learning (EWC, rehearsal) | Pas commencé |
+| D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
 | E | Auto-modification (proposer/tester variants) | Pas commencé |
 | F | Meta-RL (MAML / RL² / context-based) | Reportable V3 |
 
@@ -69,6 +72,46 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels. 
 
 - `ReplayBuffer.current_index` — propriété publique (remplace l'accès direct à `_idx`). Commit `9998743`.
 - Imports `invariants.py` et `test_verifier.py` consolidés en tête de fichier (PEP 8). Commits `f5f4d8f` et `920e208`.
+- Imports `test_maze_generators.py` consolidés + harmonisation `assert`/`ValueError` dans `RandomObstaclesGenerator.__post_init__`. Commit `bbcfd55`.
+
+### V2-X — état final des phases (livraison 2026-05-22)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Setup (scaffold envs/) | T1 | ✅ | — | 1 |
+| 2 — `maze_bfs_check` | T2 | ✅ | 7 | 1 |
+| 3 — `RandomObstaclesGenerator` (BFS-checked) | T3 | ✅ | 6 (+1 property) | 1 |
+| 4 — `PerfectMazeGenerator` (DFS backtracker, quasi-parfait tailles paires) | T4 | ✅ | 5 (+1 property) | 1 + fixup `bbcfd55` |
+| 5 — `ProceduralEnvConfig` + `SchedulerConfig` | T5 | ✅ | 9 | 1 |
+| 6 — `AdaptiveDifficultyScheduler` | T6 | ✅ | 7 | 1 |
+| 7 — `DifficultyBucketTracker` + `MetricsTracker.has_data` | T7 | ✅ | 5 | 1 |
+| 8 — `ProceduralGridWorld` | T8 | ✅ | 5 | 1 |
+| 9 — `encode_procedural_observation` (one-hot + grid flatten + padding) | T9 | ✅ | 5 | 1 |
+| 10 — `ProceduralDQNRunner` + extensions `RunnerCallbacks` | T10 | ✅ | 3 | 1 |
+| 11 — `scripts/train_dqn_procedural.py` + CI smoke | T11 | ✅ | — | 1 |
+| 12 — GUI : signal `maze_changed`, 5e courbe, label, bouton Procedural | T12-T14 | ✅ | — | 3 |
+| 13 — README V2-X + DoD + tag `v0.2.0-x` | T15-T16 | ✅ | — | 1 + tag |
+
+### Composants V2-X livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `maze_bfs_check` | `mw_ia/envs/maze_generators.py` | BFS 4-connexe — garantie solvabilité |
+| `RandomObstaclesGenerator` | idem | Place N obstacles aléatoires + check BFS post-hoc (regen ≤100 tentatives sinon `RuntimeError`) |
+| `PerfectMazeGenerator` | idem | DFS recursive backtracker, solvable par construction (quasi-parfait pour tailles paires) |
+| `ProceduralEnvConfig`, `SchedulerConfig` | `mw_ia/config.py` | frozen dataclasses + `__post_init__` validation |
+| `AdaptiveDifficultyScheduler` | `mw_ia/training/scheduler.py` | winrate ≥ 80 % → diff +0.05 ; ≤ 30 % → -0.05 |
+| `DifficultyBucketTracker` | `mw_ia/training/metrics.py` | 5 buckets [0,0.2)..[0.8,1.0], routing `min(4, int(diff*5))` |
+| `ProceduralGridWorld` | `mw_ia/envs/procedural_env.py` | Wrapper sur V1 `GridWorld`, régénère le maze à chaque `reset()` |
+| `encode_procedural_observation` | idem | one-hot position (`max_rows*max_cols` dim) + grid flatten (idem) → dim 200 par défaut, padding zéro pour mazes < max_size |
+| `ProceduralDQNRunner` | `mw_ia/training/runner.py` | Boucle DQN procedural avec scheduler + bucket tracker + callbacks GUI étendus |
+| GUI procedural | `mw_ia/gui/widgets/{gridworld_view,live_plots,control_panel,difficulty_label}.py` | Signal `maze_changed`, 5e courbe `difficulty`, label "Maze #N, diff=X.XX", bouton "Démarrer (procedural)" |
+
+**Décisions techniques V2-X** :
+
+- **Observation procedural** : la spec parlait de `[row, col, *grid_flatten]` (2+R*C dim). Découverte pendant impl : V1 utilise déjà un encoding **one-hot** (`DQNRunner._state_vec`). Aligné sur ce pattern : observation = `concat(position_one_hot, grid_flatten)` = `2 * max_rows * max_cols` dim. Documenté dans la docstring d'`encode_procedural_observation`.
+- **`max_density` fixture test à 0.40 vs default classe 0.50** : empiriquement sur 10×10, density=0.50 produit ~0.6 % de mazes solvables par tirage → flaky avec `max_attempts=100`. Fixture test descendu à 0.40 (taux succès ~10.8 %/tirage → 99.9 % en 100 tentatives). Le default de la classe reste 0.50 (spec respectée, à utiliser en connaissance de cause).
+- **DFS tailles paires** : le DFS classique creuse uniquement les cellules paires/paires. Pour size paire (4, 6, …, 20), `goal=(size-1, size-1)` est impair/impair → non accessible. Fix : ouvrir explicitement les 2 murs intermédiaires vers le voisin pair-pair. Conséquence : "quasi-parfait" (goal accessible par 1-2 chemins supplémentaires), pas strict-parfait. Documenté dans la docstring.
 
 ---
 
@@ -141,69 +184,79 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 ---
 
-## Arborescence (état après V2-A, tag `v0.2.0-a`)
+## Arborescence (état après V2-X, tag `v0.2.0-x`)
 
 ```
 MW_IA/
 ├── CLAUDE.md                           # ce fichier
-├── README.md                           # théorie + install + archi + section V2-A
+├── README.md                           # théorie + install + archi + sections V2-A et V2-X
 ├── requirements.txt                    # + hypothesis>=6.100
 ├── pyproject.toml
 ├── check_gpu.py
 ├── .github/workflows/
-│   └── aether_verify.yml               # CI : pytest + aether/verify_all.sh
+│   └── aether_verify.yml               # CI : pytest + smoke procedural + aether/verify_all.sh
 ├── scripts/
 │   ├── train_tabular.py
-│   ├── train_dqn.py
+│   ├── train_dqn.py                    # V1 fix-map
+│   ├── train_dqn_procedural.py         # [V2-X] CLI procedural
 │   └── launch_gui.py
 ├── mw_ia/
-│   ├── config.py
-│   ├── envs/gridworld.py
-│   ├── agents/                         # base.py, value_iteration.py, policy_iteration.py, q_learning.py, dqn.py
-│   ├── neural/                         # network.py, replay_buffer.py (+ current_index property), trainer.py
-│   ├── training/                       # metrics.py, runner.py
+│   ├── config.py                       # + ProceduralEnvConfig + SchedulerConfig [V2-X]
+│   ├── envs/
+│   │   ├── gridworld.py                # V1 inchangé
+│   │   ├── maze_generators.py          # [V2-X] maze_bfs_check + 2 générateurs
+│   │   └── procedural_env.py           # [V2-X] ProceduralGridWorld + encode helper
+│   ├── agents/                         # V1 inchangé
+│   ├── neural/                         # V1 inchangé (QNetwork déjà paramétrable input_dim)
+│   ├── training/
+│   │   ├── metrics.py                  # + DifficultyBucketTracker + has_data() [V2-X]
+│   │   ├── scheduler.py                # [V2-X] AdaptiveDifficultyScheduler
+│   │   └── runner.py                   # + ProceduralDQNRunner + 2 callbacks GUI [V2-X]
 │   ├── persistence/checkpoint.py
-│   ├── gui/                            # theme.py, widgets/, app.py
-│   └── guardrails/                     # [V2-A livré]
-│       ├── __init__.py                 # API publique (re-exports + auto-import invariants)
-│       ├── contracts.py                # Severity, Violation, VariantSpec, VerdictReport
-│       ├── exceptions.py               # InvariantViolationError
-│       ├── registry.py                 # Invariant, @invariant, _REGISTRY, applicable_invariants
-│       ├── invariants.py               # I1-I8 + helpers (_bellman_operator, _huber, _compute_epsilon)
-│       └── verifier.py                 # verify_formal + verify_or_raise
-├── aether/                             # [V2-A livré]
-│   ├── README.md                       # nature de la validation Aether v1.4
-│   ├── verify_all.sh                   # harness shell : présence + non-vacuité des 8 .aether
-│   └── invariants/
-│       ├── .gitkeep
-│       ├── i1_gamma_in_open_unit.aether
-│       ├── i2_bellman_contraction.aether
-│       ├── i3_huber_nonneg.aether
-│       ├── i4_winrate_bounds.aether
-│       ├── i5_epsilon_schedule.aether
-│       ├── i6_replay_buffer_capacity.aether
-│       ├── i7_reward_bounded.aether
-│       └── i8_episode_termination_exclusive.aether
-├── tests/                              # 95 tests (52 V1 + 43 V2-A)
+│   ├── gui/
+│   │   ├── theme.py
+│   │   ├── app.py                      # + on_start_procedural + 2 signaux thread [V2-X]
+│   │   └── widgets/
+│   │       ├── gridworld_view.py       # + on_maze_changed slot (redraw obstacles) [V2-X]
+│   │       ├── live_plots.py           # + 5e courbe difficulty, layout 2x3 [V2-X]
+│   │       ├── control_panel.py        # + bouton "Démarrer (procedural)" [V2-X]
+│   │       ├── difficulty_label.py     # [V2-X] label "Maze #N, diff=X.XX"
+│   │       ├── stats_panel.py          # V1 inchangé
+│   │       └── log_console.py          # V1 inchangé
+│   └── guardrails/                     # [V2-A livré, inchangé V2-X]
+│       ├── __init__.py
+│       ├── contracts.py
+│       ├── exceptions.py
+│       ├── registry.py
+│       ├── invariants.py
+│       └── verifier.py
+├── aether/                             # [V2-A livré, inchangé V2-X]
+│   ├── README.md
+│   ├── verify_all.sh
+│   └── invariants/iN_*.aether          # 8 fichiers
+├── tests/                              # 148 tests (52 V1 + 43 V2-A + 53 V2-X)
 │   ├── (V1 inchangés)
-│   └── guardrails/
-│       ├── conftest.py
-│       ├── test_contracts.py           # 14 tests
-│       ├── test_exceptions.py          # 2 tests
-│       ├── test_registry.py            # 5 tests
-│       ├── test_invariants.py          # 13 tests
-│       ├── test_verifier.py            # 5 tests
-│       ├── test_public_api.py          # 1 smoke test
-│       └── test_aether_python_sync.py  # 3 tests anti-drift Aether↔Python
+│   ├── guardrails/                     # [V2-A]
+│   ├── envs/                           # [V2-X]
+│   │   ├── conftest.py                 # fixture rng seedée
+│   │   ├── test_maze_generators.py     # 18 tests (BFS + 2 générateurs + property-based)
+│   │   └── test_procedural_env.py      # 10 tests (env wrapper + encode)
+│   ├── training/                       # [V2-X]
+│   │   ├── test_scheduler.py           # 7 tests
+│   │   ├── test_bucket_tracker.py      # 5 tests
+│   │   └── test_procedural_runner.py   # 3 tests d'intégration
+│   └── test_procedural_config.py       # [V2-X] 9 tests
 ├── checkpoints/                        # .pt / .npz (gitignored)
 ├── logs/
 └── docs/superpowers/
     ├── specs/
     │   ├── 2026-05-21-mw-ia-rl-design.md                     # V1
-    │   └── 2026-05-21-mw-ia-v2-aether-guardrails-design.md   # V2-A (note : scope SMT vs runner adapté pendant impl)
+    │   ├── 2026-05-21-mw-ia-v2-aether-guardrails-design.md   # V2-A
+    │   └── 2026-05-22-mw-ia-procedural-env-design.md         # V2-X
     └── plans/
         ├── 2026-05-21-mw-ia-v1.md                            # V1
-        └── 2026-05-21-mw-ia-v2-aether-guardrails.md          # V2-A (33 tâches, 9 phases — toutes ✅)
+        ├── 2026-05-21-mw-ia-v2-aether-guardrails.md          # V2-A
+        └── 2026-05-22-mw-ia-procedural-env.md                # V2-X (16 tâches sur 13 phases — toutes ✅)
 ```
 
 ---
@@ -214,7 +267,7 @@ MW_IA/
 ```bash
 source .venv/Scripts/activate && pytest -q
 ```
-Attendu : **95 passed** (52 V1 + 43 V2-A).
+Attendu : **148 passed** (52 V1 + 43 V2-A + 53 V2-X).
 
 ### Entraîner Q-Learning tabulaire (headless)
 ```bash
@@ -232,6 +285,16 @@ Référence : winrate 99 % niveau Expert en ~19 s sur RTX 3060.
 ```bash
 source .venv/Scripts/activate && python scripts/launch_gui.py
 ```
+
+Boutons : "Démarrer" (V1 fix-map) ou "Démarrer (procedural)" (V2-X mazes aléatoires + curriculum).
+
+### Entraîner DQN procedural (headless V2-X)
+```bash
+source .venv/Scripts/activate && python scripts/train_dqn_procedural.py --episodes 500 --mode obstacles --device cuda
+# ou : --mode maze
+```
+
+Sortie : winrate global + per-bucket (5 buckets de difficulté) + difficulté finale.
 
 ### Smoke test des guardrails V2-A
 ```bash
@@ -280,6 +343,12 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 9. **`@example` Aether v1.4 et floats** : `aether_verify` compare `expected == actual` strictement. Choisir des `@example` qui produisent des floats IEEE 754 exacts (ex. `(0.5, 4, 2) → 0.75` exact, pas `(0.05, 50000, 25000) → 0.5250000000000001`). Pattern utilisé en T25 (I5).
 
+10. **V2-X `RandomObstaclesGenerator` densité > 0.40 sur 10×10** : statistiquement instable (probabilité de solvabilité chute exponentiellement avec la densité 4-connexe). Le default classe `max_density=0.50` est respecté mais probabilité succès ~45 % en 100 tentatives. Préférer `max_density ≤ 0.40` pour les fixture de test ou tout contexte qui ne tolère pas de `RuntimeError` probabilistes.
+
+11. **V2-X `PerfectMazeGenerator` est "quasi-parfait" sur tailles paires** : le DFS classique creuse uniquement les cellules paires-paires ; pour size paire, `goal=(size-1, size-1)` est forcé accessible via ouverture de 1-2 murs intermédiaires. Conséquence : 1-2 chemins supplémentaires localement sur les dernières cellules vers goal. Solvabilité garantie par construction (pas besoin de BFS-check). Documenté dans la docstring de la classe.
+
+12. **V2-X observation procedural** : `encode_procedural_observation` produit `concat(position_one_hot, grid_flatten)` de dim `2 * max_rows * max_cols` (= 200 pour 10×10), pas `[row, col, *grid]` comme la spec V2-X originale le suggérait. Aligné sur le pattern V1 `DQNRunner._state_vec`. Mazes plus petits que `max_size` paddés top-left avec zéros (cellules libres) — l'agent voit des bordures artificielles qu'il apprend à ignorer.
+
 ---
 
 ## Mémoires persistantes liées
@@ -295,32 +364,32 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 ### Reprise par défaut — attaquer un nouveau sous-projet
 
-V2-A étant terminé, la **suite naturelle** est le **sous-projet B (mémoire persistante cross-session)** ou une **évolution roadmap** (cf. section "Roadmap d'évolutions additionnelles" plus haut — 8 idées dont environnement procédural, CNN, LSTM, visualisation neuronale GUI, etc.).
+V2-A et V2-X étant terminés, la **suite naturelle** est :
+- soit le **sous-projet B (mémoire persistante cross-session)** — RVF, agent qui se souvient d'une session à l'autre ;
+- soit une **autre évolution roadmap** (LSTM/GRU pour mémoire neuronale, CNN perception visuelle, personnalités d'IA, multi-objectifs, visualisation neuronale GUI, Double DQN…) ;
+- soit **observer V2-X en grand entraînement (1000-5000 ép.)** pour quantifier l'oubli catastrophique des niveaux faciles → décision de lancer D (continual learning) en fonction.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 95 passed. + `bash aether/verify_all.sh` → 8 OK.
-3. **Aligner avec l'utilisateur** sur le prochain sous-projet :
-   - **B — Mémoire persistante cross-session** (RVF, agent qui se souvient d'une session à l'autre)
-   - Ou une évolution roadmap (#1-8 listées dans la section "Roadmap d'évolutions additionnelles") — particulièrement **#8 environnement procédural / curriculum learning** qui couple naturellement avec D
-   - Ou un sous-projet C/D/E/F directement
+   Attendu : 148 passed. + `bash aether/verify_all.sh` → 8 OK.
+3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
    - Écrire la spec dans `docs/superpowers/specs/YYYY-MM-DD-<sub-projet>-design.md`
    - `superpowers:writing-plans` → plan TDD bite-sized
-   - `superpowers:subagent-driven-development` (pattern V2-A) : implementer + spec reviewer + code quality reviewer par task
-5. **Ne pas démarrer en code-only** sur un nouveau sous-projet — passer obligatoirement par brainstorm + spec + plan, comme V2-A.
+   - `superpowers:subagent-driven-development` (pattern V1/V2-A/V2-X) : implementer + spec reviewer + code quality reviewer par task ou groupe cohérent. Pour les blocks à faible risque (dataclasses, helpers isolés), la review peut être skippée par inspection directe du diff.
+5. **Ne pas démarrer en code-only** sur un nouveau sous-projet — passer obligatoirement par brainstorm + spec + plan, comme V2-A et V2-X.
 
-### Si l'objectif est un quick fix / petite feature V1
+### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0` ou `v0.2.0-a` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 95 passed)
-- Ne pas toucher au module `mw_ia/guardrails/` ni à `aether/invariants/` sans raison documentée (V2-A livré, surface stable)
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 148 passed)
+- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/training/scheduler.py`, `mw_ia/envs/procedural_env.py`) sans raison documentée
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)
 
-Terminer **B → C → D → E** d'abord (ordre des prérequis logiques : mémoire → évaluateur → continual learning → auto-mod), sauf décision explicite de l'utilisateur. Chaque sous-projet reste un cycle complet brainstorm + spec + plan + impl.
+Terminer **B → C → D → E** d'abord (ordre des prérequis logiques : mémoire → évaluateur → continual learning → auto-mod), sauf décision explicite de l'utilisateur. Le bucket tracker V2-X livré pose déjà l'infrastructure observationelle pour D. Chaque sous-projet reste un cycle complet brainstorm + spec + plan + impl.
