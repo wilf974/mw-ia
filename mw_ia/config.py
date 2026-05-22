@@ -139,3 +139,82 @@ class SchedulerConfig:
             raise ValueError(f"step doit être ∈ (0,1], reçu {self.step}")
         if self.update_interval <= 0:
             raise ValueError(f"update_interval doit être > 0, reçu {self.update_interval}")
+
+
+@dataclass(frozen=True)
+class DRQNConfig:
+    """Deep Recurrent Q-Network (LSTM). Successeur V2-Y de DQNConfig.
+
+    ATTENTION : replay_capacity compte des TRAJECTOIRES (pas transitions
+    comme DQNConfig.replay_capacity).
+    """
+
+    # Réseau
+    fc_hidden: int = 256                # couche FC avant LSTM
+    lstm_hidden: int = 128              # taille du hidden state LSTM
+
+    # Sequence
+    sequence_length: int = 32
+
+    # Replay (NOMBRE DE TRAJECTOIRES, pas transitions)
+    replay_capacity: int = 5_000
+    min_episodes_to_learn: int = 100
+    train_steps_per_episode: int = 4
+
+    # Optimisation (identique V1)
+    batch_size: int = 128
+    lr: float = 1e-3
+    gamma: float = 0.99
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.05
+    epsilon_decay_steps: int = 200_000  # default V2-X gagnant
+    target_sync_steps: int = 1_000
+    use_amp: bool = True
+
+    # Training
+    episodes: int = 5_000
+    max_steps_per_episode: int = 200
+
+    def __post_init__(self) -> None:
+        if not (1 <= self.sequence_length <= self.max_steps_per_episode):
+            raise ValueError(
+                f"sequence_length {self.sequence_length} hors [1, {self.max_steps_per_episode}]"
+            )
+        if self.replay_capacity <= 0:
+            raise ValueError(f"replay_capacity doit être > 0, reçu {self.replay_capacity}")
+        if self.min_episodes_to_learn <= 0:
+            raise ValueError(
+                f"min_episodes_to_learn doit être > 0, reçu {self.min_episodes_to_learn}"
+            )
+        if self.train_steps_per_episode <= 0:
+            raise ValueError(
+                f"train_steps_per_episode doit être > 0, reçu {self.train_steps_per_episode}"
+            )
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size doit être > 0, reçu {self.batch_size}")
+        if self.lr <= 0:
+            raise ValueError(f"lr doit être > 0, reçu {self.lr}")
+        if not (0.0 < self.gamma < 1.0):
+            raise ValueError(f"gamma doit être ∈ (0,1), reçu {self.gamma}")
+        if not (0.0 <= self.epsilon_end <= self.epsilon_start <= 1.0):
+            raise ValueError(
+                f"epsilon invalide : start={self.epsilon_start}, end={self.epsilon_end}"
+            )
+        if self.epsilon_decay_steps <= 0:
+            raise ValueError(
+                f"epsilon_decay_steps doit être > 0, reçu {self.epsilon_decay_steps}"
+            )
+        if self.target_sync_steps <= 0:
+            raise ValueError(
+                f"target_sync_steps doit être > 0, reçu {self.target_sync_steps}"
+            )
+        if self.fc_hidden <= 0 or self.lstm_hidden <= 0:
+            raise ValueError(
+                f"fc_hidden et lstm_hidden doivent être > 0, reçu fc={self.fc_hidden}, lstm={self.lstm_hidden}"
+            )
+        if self.episodes <= 0:
+            raise ValueError(f"episodes doit être > 0, reçu {self.episodes}")
+        if self.max_steps_per_episode <= 0:
+            raise ValueError(
+                f"max_steps_per_episode doit être > 0, reçu {self.max_steps_per_episode}"
+            )
