@@ -21,6 +21,10 @@ jobs:
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
       - name: Run pytest
         run: pytest -q
+      - name: Smoke test procedural training
+        run: |
+          python scripts/train_dqn_procedural.py --episodes 10 --mode obstacles --device cpu
+          python scripts/train_dqn_procedural.py --episodes 10 --mode maze --device cpu
 
   aether-files:
     runs-on: ubuntu-latest
