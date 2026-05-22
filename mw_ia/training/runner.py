@@ -482,9 +482,9 @@ class ConvProceduralDQNRunner(_BaseRunner):
             n_actions=4, cfg=dqn_cfg, device=device, seed=seed,
         )
 
-        # V2-V : periodic assessment + best-checkpoint
+        # V2-V : eval périodique + best-checkpoint
         if dqn_cfg.eval_enabled:
-            # Env d'assessment séparé avec MÊME proc_cfg que training mais générateur fresh
+            # Env eval séparé avec MÊME proc_cfg que training mais générateur fresh
             eval_gen = type(env.generator).__new__(type(env.generator))
             eval_gen.__dict__.update(env.generator.__dict__)
             eval_env = ProceduralGridWorld(cfg=proc_cfg, generator=eval_gen)
@@ -575,25 +575,25 @@ class ConvProceduralDQNRunner(_BaseRunner):
                     f"diff={self.scheduler.current:.2f}"
                 )
 
-            # V2-V : assessment périodique + best-checkpoint
+            # V2-V : eval périodique + best-checkpoint
             if (
                 self.evaluator is not None
                 and (ep + 1) % self.dqn_cfg.eval_every_episodes == 0
             ):
-                assessment_metrics = self.evaluator.evaluate(self.agent, self.scheduler.current)
-                improved = self.best_tracker.update(assessment_metrics, self.agent, episode=ep)
+                eval_metrics = self.evaluator.evaluate(self.agent, self.scheduler.current)
+                improved = self.best_tracker.update(eval_metrics, self.agent, episode=ep)
                 self.callbacks.fire_evaluation(
                     ep=ep,
-                    eval_winrate=assessment_metrics["winrate"],
-                    eval_diff=assessment_metrics["difficulty"],
+                    eval_winrate=eval_metrics["winrate"],
+                    eval_diff=eval_metrics["difficulty"],
                     best_winrate=self.best_tracker.best_winrate,
                     best_episode=self.best_tracker.best_episode,
                     improved=improved,
                 )
                 self.callbacks.fire_log(
                     "info",
-                    f"assessment ep {ep:>4} : winrate={assessment_metrics['winrate']:.2%} "
-                    f"@ diff={assessment_metrics['difficulty']:.2f}  "
+                    f"eval ep {ep:>4} : winrate={eval_metrics['winrate']:.2%} "
+                    f"@ diff={eval_metrics['difficulty']:.2f}  "
                     f"best={self.best_tracker.best_winrate:.2%} "
                     f"@ ep {self.best_tracker.best_episode}"
                     + ("  NEW BEST" if improved else "")
