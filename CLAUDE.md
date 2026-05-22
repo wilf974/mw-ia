@@ -113,6 +113,30 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 - **`max_density` fixture test à 0.40 vs default classe 0.50** : empiriquement sur 10×10, density=0.50 produit ~0.6 % de mazes solvables par tirage → flaky avec `max_attempts=100`. Fixture test descendu à 0.40 (taux succès ~10.8 %/tirage → 99.9 % en 100 tentatives). Le default de la classe reste 0.50 (spec respectée, à utiliser en connaissance de cause).
 - **DFS tailles paires** : le DFS classique creuse uniquement les cellules paires/paires. Pour size paire (4, 6, …, 20), `goal=(size-1, size-1)` est impair/impair → non accessible. Fix : ouvrir explicitement les 2 murs intermédiaires vers le voisin pair-pair. Conséquence : "quasi-parfait" (goal accessible par 1-2 chemins supplémentaires), pas strict-parfait. Documenté dans la docstring.
 
+### V2-X — recette opérationnelle (post-livraison, sessions empiriques 2026-05-22)
+
+Le DQN feedforward V1 par défaut (`hidden=(128, 128)`, `epsilon_decay_steps=50000`) **ne converge PAS** en mode procedural obstacles 10×10 : winrate 1 % à 2000 ép (pire que random). Trois leviers indépendants identifiés et corrigés :
+
+| Levier | Symptôme | Fix | Effet sur winrate final 2000 ép |
+|---|---|---|---|
+| 1. `min_density=0.10` trop élevé | Curriculum bloqué à diff=0 dès le départ (10 obstacles d'office) | Default → **0.0** (commits `97f3f30`) | 1% → 53% |
+| 2. `hidden_layers=(128, 128)` insuffisant | Agent retombe à diff=0 après bref passage à 0.05 | `--hidden 256 256` (CLI option `8c7b091`) | 53% → 47%* |
+| 3. `epsilon_decay_steps=50000` trop court (ε=0.05 dès ép 290) | Quasi-greedy avant consolidation politique | `--epsilon-decay-steps 200000` (CLI `40a6b23`) | 47% → **80%** ✓ |
+
+\* baisse marginale isolément, mais permet de tenir diff=0.05 (vs 0.00 avant)
+
+**Recette gagnante** (winrate=80%, diff=0.10 à 2000 ép, scheduler oscille adaptativement entre 0.05 et 0.10) :
+
+```bash
+python scripts/train_dqn_procedural.py \
+    --episodes 2000 --mode obstacles --device cuda \
+    --hidden 256 256 --epsilon-decay-steps 200000
+```
+
+**Plafond architectural identifié** : avec cette recette, l'agent reste bloqué autour de diff=0.10 (bucket 0 du tracker, 80% winrate). Les buckets 1-4 restent vides. Le critère spec V2-X "≥70% à bucket max densité 0.4" est **inatteignable avec le DQN feedforward simple** — c'est précisément ce que la spec prédisait. Justifie le **sous-projet V2-Y LSTM/GRU** (roadmap #1) : mémoire neuronale temporelle pour vrai apprentissage maze-conditional. Alternativement : Double DQN, Dueling, CNN sur image rendue (roadmap #2/#7).
+
+**Comportement adaptatif vérifié** : avec la recette gagnante, le scheduler monte à diff 0.10 (winrate ≥ 80%), l'agent struggle, scheduler redescend à 0.05 (winrate ≤ 30%), agent réapprend, retest. Mécanisme PCG-RL canonique opérationnel.
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
