@@ -17,6 +17,8 @@ from mw_ia.agents.recurrent_dqn import RecurrentDQNAgent
 from mw_ia.config import ConvDQNConfig, DQNConfig, DRQNConfig, ProceduralEnvConfig, QLearningConfig, SchedulerConfig, TrainingConfig
 from mw_ia.envs.gridworld import GridWorld
 from mw_ia.envs.procedural_env import ProceduralGridWorld, encode_procedural_observation, encode_procedural_observation_2d
+from mw_ia.training.checkpoint_tracker import BestCheckpointTracker
+from mw_ia.training.evaluator import PeriodicEvaluator
 from mw_ia.training.metrics import DifficultyBucketTracker, MetricsTracker
 from mw_ia.training.scheduler import AdaptiveDifficultyScheduler
 
@@ -37,6 +39,7 @@ class RunnerCallbacks:
     on_log: LogCb | None = None
     on_maze_changed: Callable[..., None] | None = None
     on_difficulty_updated: Callable[..., None] | None = None
+    on_eval: Callable[..., None] | None = None
 
     def fire_step(self, **kw: object) -> None:
         if self.on_step:
@@ -65,6 +68,10 @@ class RunnerCallbacks:
     def fire_difficulty_updated(self, **kw: object) -> None:
         if self.on_difficulty_updated:
             self.on_difficulty_updated(**kw)
+
+    def fire_assessment(self, **kw: object) -> None:
+        if self.on_eval:
+            self.on_eval(**kw)
 
 
 class _BaseRunner:
@@ -475,6 +482,26 @@ class ConvProceduralDQNRunner(_BaseRunner):
             n_actions=4, cfg=dqn_cfg, device=device, seed=seed,
         )
 
+        # V2-V : periodic assessment + best-checkpoint
+        if dqn_cfg.eval_enabled:
+            # Env d'assessment séparé avec MÊME proc_cfg que training mais générateur fresh
+            eval_gen = type(env.generator).__new__(type(env.generator))
+            eval_gen.__dict__.update(env.generator.__dict__)
+            eval_env = ProceduralGridWorld(cfg=proc_cfg, generator=eval_gen)
+            self.evaluator: PeriodicEvaluator | None = PeriodicEvaluator(
+                eval_env=eval_env,
+                eval_seeds=dqn_cfg.eval_seeds,
+                max_steps=dqn_cfg.eval_max_steps,
+                observation_encoder=encode_procedural_observation_2d,
+                proc_cfg=proc_cfg,
+            )
+            self.best_tracker: BestCheckpointTracker | None = BestCheckpointTracker(
+                path=dqn_cfg.best_checkpoint_path,
+            )
+        else:
+            self.evaluator = None
+            self.best_tracker = None
+
     def run(self) -> None:
         self.callbacks.fire_log(
             "info",
@@ -546,4 +573,28 @@ class ConvProceduralDQNRunner(_BaseRunner):
                     f"ep {ep:>4}  R={ep_reward:+.2f}  L={ep_len:>3}  "
                     f"eps={self.agent.epsilon:.3f}  winrate={self.metrics.winrate():.2%}  "
                     f"diff={self.scheduler.current:.2f}"
+                )
+
+            # V2-V : assessment périodique + best-checkpoint
+            if (
+                self.evaluator is not None
+                and (ep + 1) % self.dqn_cfg.eval_every_episodes == 0
+            ):
+                assessment_metrics = self.evaluator.evaluate(self.agent, self.scheduler.current)
+                improved = self.best_tracker.update(assessment_metrics, self.agent, episode=ep)
+                self.callbacks.fire_assessment(
+                    ep=ep,
+                    eval_winrate=assessment_metrics["winrate"],
+                    eval_diff=assessment_metrics["difficulty"],
+                    best_winrate=self.best_tracker.best_winrate,
+                    best_episode=self.best_tracker.best_episode,
+                    improved=improved,
+                )
+                self.callbacks.fire_log(
+                    "info",
+                    f"assessment ep {ep:>4} : winrate={assessment_metrics['winrate']:.2%} "
+                    f"@ diff={assessment_metrics['difficulty']:.2f}  "
+                    f"best={self.best_tracker.best_winrate:.2%} "
+                    f"@ ep {self.best_tracker.best_episode}"
+                    + ("  NEW BEST" if improved else "")
                 )
