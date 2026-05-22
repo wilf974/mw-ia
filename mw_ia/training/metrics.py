@@ -49,6 +49,10 @@ class MetricsTracker:
             return 0.0
         return sum(self._success_window) / len(self._success_window)
 
+    def has_data(self) -> bool:
+        """True si au moins un épisode a été enregistré."""
+        return bool(self._success_window)
+
     def level(self, *, winrate: float | None = None) -> Level:
         wr = self.winrate() if winrate is None else winrate
         low, mid, hi = self.cfg.level_thresholds
@@ -59,3 +63,28 @@ class MetricsTracker:
         if wr < hi:
             return Level.ADVANCED
         return Level.EXPERT
+
+
+class DifficultyBucketTracker:
+    """5 MetricsTracker, un par bucket de difficulté [0,0.2), [0.2,0.4), ...
+
+    Routing : bucket = min(4, int(difficulty * 5)). Le min(4, ...) gère
+    difficulty=1.0 qui donnerait sinon bucket=5 (out of bounds).
+    """
+
+    N_BUCKETS = 5
+
+    def __init__(self, cfg: TrainingConfig) -> None:
+        self.cfg = cfg
+        self._trackers: list[MetricsTracker] = [
+            MetricsTracker(cfg) for _ in range(self.N_BUCKETS)
+        ]
+
+    def record_episode(
+        self, *, success: bool, reward: float, length: int, difficulty: float
+    ) -> None:
+        bucket = min(self.N_BUCKETS - 1, int(difficulty * self.N_BUCKETS))
+        self._trackers[bucket].record_episode(reward, length, success=success)
+
+    def winrate_per_bucket(self) -> list[float | None]:
+        return [t.winrate() if t.has_data() else None for t in self._trackers]
