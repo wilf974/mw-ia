@@ -1,0 +1,22 @@
+; I1 — gamma_in_open_unit
+;
+; gamma doit etre dans l'intervalle ouvert (0,1) strict pour garantir la
+; contraction γ-lipschitz de l'operateur de Bellman optimal en norme infinie.
+;
+; - gamma = 0 : pas d'horizon, l'agent ignore tout futur (degenere).
+; - gamma = 1 : non-contraction stricte (cas non-discounted), peut diverger.
+;
+; Pendant V2-A Phase 5, l'implementation Python est dans
+;   mw_ia/guardrails/invariants.py::gamma_in_open_unit
+;
+; Validation par exemples representatifs : 3 cas positifs + 4 cas negatifs.
+
+(@intent "Predicat I1 : gamma_in_open_unit — gamma doit etre dans (0,1) strict pour garantir la contraction de l'operateur de Bellman")
+(@example 0.99 true)
+(@example 0.5 true)
+(@example 0.001 true)
+(@example 0.0 false)
+(@example 1.0 false)
+(@example 1.5 false)
+(@example -0.5 false)
+(fn gamma_valid ((gamma num)) bool (and (> gamma 0.0) (< gamma 1.0)))
