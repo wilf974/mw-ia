@@ -92,6 +92,72 @@ Le `TrainingRunner` est **callback-friendly** (pas de dépendance Qt) ; un `QThr
 - GUI : grille animée, 4 courbes live, Start/Pause/Reset/Save/Load fonctionnels
 - `pytest tests/` au vert
 
+## V2-A — Aether guardrails (sous-projet livré)
+
+Catalogue de **8 invariants RL** formalises en Aether v1.4 (validation par
+`@example` + `@invariant` via le test runner Aether) et re-testes en runtime
+via property-based testing Python. API publique consommable par le futur
+sous-projet E (auto-modification).
+
+### Usage minimal
+
+```python
+from mw_ia.guardrails import VariantSpec, verify_formal
+
+spec = VariantSpec(
+    gamma=0.99, lr=1e-3,
+    epsilon_start=1.0, epsilon_end=0.05, epsilon_decay_steps=50_000,
+    batch_size=128, replay_capacity=100_000, target_sync_steps=1_000,
+)
+
+report = verify_formal(spec)
+if report.passed:
+    print("OK variant valide")
+else:
+    for v in report.violations:
+        print(f"  X {v.invariant_id} : {v.message}")
+```
+
+Pour les contextes "tout ou rien" (CI, pre-commit) :
+
+```python
+from mw_ia.guardrails import verify_or_raise, InvariantViolationError
+
+try:
+    verify_or_raise(spec)
+except InvariantViolationError as e:
+    # e.report contient la liste complete des violations
+    raise
+```
+
+### Catalogue v1
+
+| ID | Invariant                          | Énoncé |
+| -- | ---------------------------------- | ------ |
+| I1 | `gamma_in_open_unit`               | γ ∈ (0,1) strict |
+| I2 | `bellman_contraction`              | T γ-Lipschitz en norme infinie |
+| I3 | `huber_nonneg`                     | Huber(y, ŷ) ≥ 0 |
+| I4 | `winrate_bounds`                   | winrate ∈ [0,1] |
+| I5 | `epsilon_schedule_decreasing`      | ε(t) décroît, ∈ [0,1] |
+| I6 | `replay_buffer_capacity`           | buffer.size ≤ capacity |
+| I7 | `reward_bounded`                   | r_min ≤ r_max |
+| I8 | `episode_termination_exclusive`    | terminated ⊕ truncated |
+
+### Architecture
+
+- `mw_ia/guardrails/` — module Python autonome (zéro dépendance Aether runtime)
+- `aether/invariants/*.aether` — validations Aether v1.4 versionnées
+- `tests/guardrails/test_aether_python_sync.py` — vérifie la cohérence
+  `aether/invariants/iN_*.aether` ↔ `@invariant("IN")` Python
+
+### Nature de la validation Aether
+
+Aether v1.4 est un **interpréteur Lisp typé avec test runner property-based**,
+pas un theorem prover SMT. Les fichiers `.aether` ne sont donc pas des
+*preuves formelles universelles* mais des validations déclaratives (`@example`
++ `@invariant`) exécutées par `mcp__aether__aether_verify`. Une vraie
+vérification universelle (Z3 / Lean / Coq) reste possible mais hors-scope V2-A.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
