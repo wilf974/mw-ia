@@ -250,6 +250,7 @@ class ConvDQNConfig:
     target_sync_steps: int = 1_000
     train_every: int = 4
     use_amp: bool = True
+    double_dqn: bool = True   # V2-W : Hasselt 2015. False = V2-Z baseline DQN classique.
     episodes: int = 5_000
     max_steps_per_episode: int = 200
 

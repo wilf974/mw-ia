@@ -54,3 +54,15 @@ def test_aether_compat() -> None:
     )
     report = verify_formal(spec)
     assert report.passed, f"violations: {report.violations}"
+
+
+def test_double_dqn_default_true() -> None:
+    """V2-W : default double_dqn=True (V2-W est l'amélioration recommandée)."""
+    cfg = ConvDQNConfig()
+    assert cfg.double_dqn is True
+
+
+def test_double_dqn_can_be_disabled() -> None:
+    """double_dqn=False pour reproduire V2-Z baseline."""
+    cfg = ConvDQNConfig(double_dqn=False)
+    assert cfg.double_dqn is False
