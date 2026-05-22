@@ -117,8 +117,8 @@ class SchedulerConfig:
     max_difficulty: float = 1.0
     up_threshold: float = 0.80
     down_threshold: float = 0.30
-    step: float = 0.05
-    update_interval: int = 200          # épisodes (default V2-X consolidé 2026-05-22 : 50 trop agressif sur procedural, l'agent décroche entre paliers 0.05 → 0.10)
+    step: float = 0.025                 # default V2-X consolidé 2026-05-22 : 0.05 trop brusque entre paliers (agent décroche 0.05 → 0.10)
+    update_interval: int = 200          # épisodes (default V2-X consolidé 2026-05-22 : 50 trop agressif sur procedural)
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.min_difficulty <= self.max_difficulty <= 1.0):
