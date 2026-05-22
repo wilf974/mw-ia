@@ -243,6 +243,44 @@ runtime maintenu entre `act()` consécutifs dans un épisode, reset à chaque
 nouvel épisode (pas de mémoire cross-épisodes — cohérent avec le but
 "résoudre le maze courant", pas "se souvenir des mazes précédents").
 
+## V2-Z — CNN perception spatiale (sous-projet livré)
+
+**Tag** : `v0.2.0-z` — **Tests** : 208 verts (183 baseline + 25 V2-Z)
+
+Motivation : V2-X (MLP) et V2-Y (LSTM) plafonnent tous deux à `diff ≈ 0.05`.
+Le bottleneck est la représentation spatiale 1D — un encoding
+`concat(position_one_hot, grid_flatten)` détruit la structure 2D du maze.
+V2-Z remplace l'encoder par un tensor 3-canaux (agent + obstacles + goal)
+et le réseau par un Conv2D.
+
+### Usage CLI
+
+```bash
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+```
+
+Defaults gagnants V2-Z (recette consolidée à itérer empiriquement) :
+- `--conv-channels 32 64` (default)
+- `--fc-hidden 256` (default)
+- `--epsilon-decay-steps 200000` (default V2-Z, hérité V2-X)
+- `--scheduler-update-interval 200` (default V2-X)
+- `--scheduler-step 0.05` (default V2-X)
+
+### Architecture
+
+Architecture : `Conv(3→32, k=3, pad=1) → ReLU → Conv(32→64, k=3, pad=1) → ReLU →
+Flatten → Linear(64·R·C → 256) → ReLU → Linear(256 → 4)`. Pas de pooling
+pour préserver l'info spatiale sur 10×10. ~1.66M params.
+
+- `mw_ia/envs/procedural_env.py` — `encode_procedural_observation_2d` (3 canaux)
+- `mw_ia/neural/conv_network.py` — `ConvQNetwork` (Conv2d + FC)
+- `mw_ia/agents/conv_dqn.py` — `ConvDQNAgent` + `_ConvDQNTrainer` interne
+- `mw_ia/training/runner.py::ConvProceduralDQNRunner` — extension V2-Z
+
+### GUI
+
+Bouton "Démarrer (procedural CNN)" disponible dans `python scripts/launch_gui.py`.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :

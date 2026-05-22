@@ -34,6 +34,7 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 | **A** | Aether guardrails | ✅ Livré (tag `v0.2.0-a`) |
 | **X** | Environnement procédural + curriculum | ✅ Livré (tag `v0.2.0-x`) |
 | **Y** | Deep Recurrent Q-Network (LSTM, roadmap #1) | ✅ Livré (tag `v0.2.0-y`) |
+| **Z** | CNN perception spatiale (roadmap #2) | ✅ Livré (tag `v0.2.0-z`) |
 | **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
@@ -247,6 +248,49 @@ python scripts/train_drqn_procedural.py --episodes 5000 --mode obstacles --devic
 - **`replay_capacity` = nombre de TRAJECTOIRES** dans `SequenceReplayBuffer` (vs V1 `ReplayBuffer` qui compte des transitions). À ne pas confondre.
 - **Fix `end_episode()` train trigger** : seuil corrigé de `>= min_episodes_to_learn` à `>= max(min_episodes_to_learn, batch_size)` pour éviter `ValueError` du buffer sample quand `batch_size > min_episodes_to_learn`. Inclus dans commit `18d09d9` (avec le runner). Concern d'atomicité commit notée mais correction acceptée pour correctness.
 - **Padding zéros + mask** plutôt que séquences fixes : permet d'entraîner sur des épisodes courts (agent atteint goal en 18 steps → 14 dernières fenêtres paddées, mask les exclut du gradient).
+
+### V2-Z — état final des phases (livraison 2026-05-22)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Setup scaffold | T1 | ✅ | — | 1 |
+| 2 — `encode_procedural_observation_2d` | T2 | ✅ | 6 | 1 |
+| 3 — `ConvQNetwork` | T3 | ✅ | 5 | 1 |
+| 4 — `ConvDQNConfig` + validation + Aether compat | T4 | ✅ | 4 | 1 |
+| 5 — `ConvDQNAgent` (+ `_ConvDQNTrainer` interne) | T5 | ✅ | 7 | 1 |
+| 6 — `ConvProceduralDQNRunner` | T6 | ✅ | 3 | 1 |
+| 7 — CLI + GUI button + CI smoke | T7-T9 | ✅ | — | 3 |
+| 8 — README V2-Z + DoD + tag `v0.2.0-z` | T10 | ✅ | — | 1 + tag |
+
+### Composants V2-Z livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `encode_procedural_observation_2d` | `mw_ia/envs/procedural_env.py` | Encoder 3 canaux (agent + obstacles + goal) shape `(3, R, C)` |
+| `ConvQNetwork` | `mw_ia/neural/conv_network.py` | Conv(3→32) → Conv(32→64) → FC(256) → FC(4), ~1.66M params pour 10×10 |
+| `ConvDQNConfig` | `mw_ia/config.py` | Frozen dataclass + validation + champs DQN dupliqués (pas d'héritage) |
+| `ConvDQNAgent` + `_ConvDQNTrainer` | `mw_ia/agents/conv_dqn.py` | DQN à perception spatiale, réutilise `ReplayBuffer` V1 (flatten/reshape autour de push/sample) |
+| `ConvProceduralDQNRunner` | `mw_ia/training/runner.py` | Extension parallèle à V2-X/V2-Y, scheduler defaults V2-X |
+| CLI | `scripts/train_cnn_dqn_procedural.py` | Flags : `--conv-channels`, `--fc-hidden`, `--epsilon-decay-steps`, `--target-sync-steps`, `--scheduler-update-interval`, `--scheduler-step` |
+| GUI button | `mw_ia/gui/widgets/control_panel.py` + `mw_ia/gui/app.py` | "Démarrer (procedural CNN)" + slot `on_start_procedural_cnn` |
+
+### Décisions techniques V2-Z
+
+- **3 canaux** (agent + obstacles + goal) plutôt que 2 : goal explicite → robuste si on varie taille/position du goal plus tard. Standard DeepMind.
+- **Pas de pooling** : grille 10×10 trop petite pour downsampling sans perte d'info.
+- **`ReplayBuffer` V1 réutilisé via flatten/reshape** : évite la duplication d'un `SpatialReplayBuffer`. Le `_ConvDQNTrainer` interne au module `conv_dqn.py` reshape `(B, 3, R, C)` au moment du train_step.
+- **Pas d'héritage de `DQNConfig`** : duplication explicite des champs partagés pour rester frozen et explicit, cohérent V2-X `ProceduralEnvConfig` et V2-Y `DRQNConfig`.
+- **Scheduler defaults V2-X** (`update=200`, `step=0.05`) : CNN feedforward, distinct V2-Y LSTM (`update=50`).
+- **Asserts ajoutés** : `state` hors grille, `grid` > max_size, `goal` hors max_size → `AssertionError` (cohérent V2-X).
+- **Extension `MetricsTracker`** : la spec a omis que les tests V2-Z référençaient `metrics.episode_rewards` et `metrics.losses` qui n'existaient pas. Extension additive (lignes 5-6 dans `mw_ia/training/metrics.py`) sans casser les 205 baseline. `_loss_history` croît per-step (~8MB sur 5000 ép × 200 steps) — cohérent avec pattern `_reward_history` V1.
+- **GUI `episodes=self.config.dqn.episodes`** : UX issue connue — par défaut, le bouton GUI lance avec 500 épisodes (default `DQNConfig.episodes`) au lieu de 5000 (default `ConvDQNConfig.episodes`). Pattern hérité V2-X. Pour vraie expérience CNN, préférer la CLI.
+
+### V2-Z — pièges connus
+
+1. **Padding zéros = bordure artificielle sur 3 canaux** : pour 10×10 fixe sans effet, mais si `max_size > taille réelle` du maze, le CNN voit une zone "vide" en bas-droite. Mitigation possible : 4ᵉ canal "valid region mask". Pas en MVP.
+2. **VRAM si on monte à `max_size=20`** : FC1 ≈ 6.5M params (vs 1.64M pour 10×10). OK sur 12 GB mais penser à `AdaptiveAvgPool2d` ou stride=2 si on va plus large.
+3. **`conv_channels=(32, 64)` peut être overkill** : 99% des params dans FC1. Tester `--conv-channels 16 32` voire `8 16` post-livraison.
+4. **Scheduler `update=200` peut être trop patient pour CNN** : à confirmer empiriquement vs `--scheduler-update-interval 100` (intermédiaire entre V2-X 200 et V2-Y 50).
 
 ---
 
@@ -535,39 +579,36 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 ### Reprise par défaut — attaquer un nouveau sous-projet
 
-V2-A, V2-X et V2-Y étant terminés ET la baseline V2-Y validée empiriquement (95% @ diff 0.05, reproductible), la **suite naturelle est CNN ou Double DQN** :
+V2-A, V2-X, V2-Y ET V2-Z (CNN) étant terminés, la **suite naturelle est Double DQN ou CNN-LSTM combiné** :
 
-**Diagnostic empirique consolidé de fin de session 2026-05-22** :
-> Le bottleneck actuel n'est PLUS la mémoire (LSTM testé, plafond identique). C'est la **représentation spatiale** (`grid_flatten` dim 100 ignore la structure 2D) + **Q-values instables** (target net DQN classique). V2-Y bat V2-X en qualité de politique au même palier, mais pas en capacité de généralisation curriculum.
+**Diagnostic empirique fin de session 2026-05-22** :
+> V2-Z (CNN perception spatiale) livré tag `v0.2.0-z`, 208 tests verts. Validation empirique 5000 ép à mener post-livraison pour confirmer le critère succès (match V2-Y @ diff=0.05 + franchir diff=0.10). Si CNN+scheduler V2-X plafonne aussi à diff=0.05, le bottleneck est l'objectif d'apprentissage (Q-values surestimation), pas la représentation.
 
-**Prochaine étape probable** (priorité à débrainstormer en session fraîche) :
+**Prochaines étapes possibles** (priorité à débrainstormer en session fraîche) :
 
-1. **V2-Z : CNN perception spatiale (roadmap #2) — recommandé** : remplacer `concat(position_one_hot, grid_flatten)` par un input 2D `(channels, rows, cols)` traité par une Conv2D. Apprend les motifs locaux (dead-ends, couloirs, intersections) avec translation equivariance, beaucoup moins de paramètres. Cible : franchir diff 0.05 vers 0.20+.
-2. **V2-W : Double DQN (roadmap #7)** : ~30 LOC modif `DQNTrainer.step()` pour découpler sélection d'action (online net) et évaluation (target net). Réduit la surestimation Q-values, particulièrement utile pour V2-Y LSTM instable.
-3. **Combinaison CNN + Double DQN** : sous-projet plus ambitieux mais probablement nécessaire pour vraiment franchir le plafond.
-
-Le **sous-projet B (mémoire persistante cross-session)** du programme V2 officiel reste viable mais est plus "autonomie long-terme" que "résoudre mazes mieux" — moins prioritaire au vu du finding bottleneck spatial.
+1. **V2-W : Double DQN (roadmap #7) — recommandé** : ~30 LOC modif `_ConvDQNTrainer.step()` pour découpler sélection d'action (online net) et évaluation (target net). Réduit surestimation Q-values. Particulièrement utile si V2-Z plafonne aussi.
+2. **V2-ZY : CNN-LSTM combiné** : sous-projet hybride V2-Z + V2-Y. ConvLSTM ou Conv→LSTM stacked. Plus ambitieux mais teste les deux axes ensemble.
+3. **Validation empirique V2-Z d'abord** : avant de partir sur un nouveau sous-projet, lancer 2 entraînements 5000 ép GPU avec defaults V2-Z et documenter les résultats dans CLAUDE.md. Décision basée sur outcome.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 183 passed. + `bash aether/verify_all.sh` → 8 OK.
-3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
+   Attendu : 208 passed. + `bash aether/verify_all.sh` → 8 OK.
+3. **Aligner avec l'utilisateur** sur le prochain sous-projet OU sur la validation empirique V2-Z.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
    - Écrire la spec dans `docs/superpowers/specs/YYYY-MM-DD-<sub-projet>-design.md`
    - `superpowers:writing-plans` → plan TDD bite-sized
-   - `superpowers:subagent-driven-development` (pattern V1/V2-A/V2-X) : implementer + spec reviewer + code quality reviewer par task ou groupe cohérent. Pour les blocks à faible risque (dataclasses, helpers isolés), la review peut être skippée par inspection directe du diff.
-5. **Ne pas démarrer en code-only** sur un nouveau sous-projet — passer obligatoirement par brainstorm + spec + plan, comme V2-A et V2-X.
+   - `superpowers:subagent-driven-development` (pattern V1/V2-A/V2-X/V2-Y/V2-Z) : implementer + spec reviewer + code quality reviewer par task ou groupe cohérent.
 
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 183 passed)
-- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`) sans raison documentée
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 208 passed)
+- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`) sans raison documentée
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)
 
