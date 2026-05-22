@@ -28,6 +28,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden", type=int, nargs="+", default=[128, 128],
                         help="Tailles des couches cachées du QNetwork (ex: --hidden 256 256)")
+    parser.add_argument("--epsilon-decay-steps", type=int, default=50_000,
+                        help="Nombre de steps pour passer ε de epsilon_start à epsilon_end (default 50000)")
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -42,7 +44,11 @@ def main() -> int:
         gen = PerfectMazeGenerator(min_size=proc_cfg.min_size, max_size=proc_cfg.max_size)
 
     env = ProceduralGridWorld(cfg=proc_cfg, generator=gen)
-    dqn_cfg = DQNConfig(episodes=args.episodes, hidden_layers=tuple(args.hidden))
+    dqn_cfg = DQNConfig(
+        episodes=args.episodes,
+        hidden_layers=tuple(args.hidden),
+        epsilon_decay_steps=args.epsilon_decay_steps,
+    )
     sched_cfg = SchedulerConfig()
     train_cfg = TrainingConfig()
 
