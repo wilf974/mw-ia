@@ -174,6 +174,45 @@ Test du scheduler V2-X consolidé (`update_interval=200`, `step=0.05`) sur V2-Y 
 - V2-Y DRQN LSTM → garder defaults V2-Y CLI (`update=50`, `step=0.05`) — JAMAIS passer `--scheduler-update-interval 200` sur V2-Y
 - Futures archis (CNN, Double DQN) → expérimenter au cas par cas
 
+### V2-Y — baseline LSTM consolidée (2026-05-22)
+
+Reproductibilité validée sur 2 entraînements 5000 ép GPU avec config CLI V2-Y consolidée :
+
+```bash
+python scripts/train_drqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+```
+
+**Defaults V2-Y CLI consolidés** (commits `e7eda95` initial + `c1c4214` CLI scheduler) :
+- `--fc-hidden 256`, `--lstm-hidden 128`, `--sequence-length 32`, `--epsilon-decay-steps 200000` (defaults CLI)
+- `--scheduler-update-interval 50`, `--scheduler-step 0.05` (defaults CLI V2-Y, distincts de SchedulerConfig() global)
+- Defaults DRQNConfig() : `replay_capacity=5000` trajectoires, `min_episodes_to_learn=100`, `train_steps_per_episode=4`, `target_sync_steps=1000`, `batch_size=128`
+
+**Résultat reproductible** :
+- **Final winrate ≈ 95% @ diff 0.05** (bucket 0 plein)
+- Pattern de trajectoire : oscillation diff 0 / 0.05, catastrophic forgetting visible au milieu (~ep 1500-2000), récupération forte en fin d'entraînement
+- Buckets 1-4 restent vides → diff 0.05 jamais franchi de manière stable
+- Critère succès original V2-Y "bucket 1 (0.2-0.4) ≥ 70 %" **PAS atteint**
+
+**Comparaison V2-X feedforward vs V2-Y LSTM** (recette gagnante pour chacun) :
+
+| Métrique | V2-X feedforward | V2-Y LSTM | Δ |
+|---|---|---|---|
+| Final winrate (bucket 0) | 72 % | **95 %** | +23 pp ✓ |
+| Final diff atteinte | 0.05 | 0.05 | = |
+| Bucket 1 rempli | non | non | = |
+| Plafond architectural | diff ~0.05 | diff ~0.05 | = (mais meilleur winrate) |
+
+**Trouvaille consolidée** : le LSTM apprend mieux **la map** (winrate +23 pp à diff identique) mais ne franchit pas le plafond de difficulté du scheduler — c'est-à-dire que l'agent récurrent maîtrise mieux les mazes à 5 obstacles mais reste incapable de tenir à 7-10 obstacles. Le plafond V2-Y est dû à un mélange de :
+1. **Catastrophic forgetting LSTM** au milieu de l'entraînement (oscille entre récupération et chute)
+2. **BPTT 32 + 4 train_steps/épisode** = updates très lourdes, l'agent ne consolide pas avant que la difficulté monte
+3. **Scheduler+LSTM = dynamique antagoniste** (cf. section précédente)
+
+**Pour franchir ce plafond, options possibles** (sous-projets V3+ ou itérations V2-Y) :
+- **Burn-in style R2D2** : remplacer DRQN simple par hidden state burn-in dans le trainer (hors-scope V2-Y MVP, documenté en `recurrent_trainer.py` docstring)
+- **Double DQN** : appliquer à V2-X ou V2-Y pour réduire surestimation Q-values (roadmap #7)
+- **CNN sur image rendue** : observation visuelle au lieu de `[position_one_hot, grid_flatten]` (roadmap #2)
+- **Tuning V2-Y** : `train_steps_per_episode=1-2`, `sequence_length=16`, `target_sync_steps=5000`
+
 ### V2-Y — état final des phases (livraison 2026-05-22)
 
 | Phase | Tâches | Statut | Tests | Commits |
