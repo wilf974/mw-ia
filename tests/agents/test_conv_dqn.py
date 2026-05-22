@@ -123,3 +123,46 @@ def test_aether_smoke() -> None:
         target_sync_steps=cfg.target_sync_steps,
     )
     assert verify_formal(spec).passed
+
+
+def test_double_dqn_branch_differs_from_standard() -> None:
+    """V2-W : avec online ≠ target, les formules DQN et Double DQN divergent.
+
+    - DQN classique :  q_next = max_a Q_target(s', a)
+    - Double DQN :     q_next = Q_target(s', argmax_a Q_online(s', a))
+
+    Si argmax_online ≠ argmax_target, les deux formules donnent des q_next
+    différents. Pour rendre ça déterministe, on désynchronise volontairement
+    online/target avant comparaison.
+    """
+    from mw_ia.neural.conv_network import ConvQNetwork
+
+    online = ConvQNetwork(
+        in_channels=3, rows=10, cols=10, n_actions=4,
+        conv_channels=(32, 64), kernel_size=3, padding=1, fc_hidden=256,
+    )
+    target = ConvQNetwork(
+        in_channels=3, rows=10, cols=10, n_actions=4,
+        conv_channels=(32, 64), kernel_size=3, padding=1, fc_hidden=256,
+    )
+    # Sync initial pour partir de poids identiques
+    target.load_state_dict(online.state_dict())
+    # Désynchroniser online en ajoutant un offset
+    with torch.no_grad():
+        for p in online.parameters():
+            p.add_(0.5)
+
+    torch.manual_seed(42)
+    next_states = torch.randn(4, 3, 10, 10)
+
+    with torch.no_grad():
+        # Formule DQN classique (V2-Z baseline)
+        q_next_dqn = target(next_states).max(dim=1).values
+        # Formule Double DQN (V2-W)
+        next_actions = online(next_states).argmax(dim=1)
+        q_next_double = target(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
+
+    # Avec online ≠ target, les 2 formules DOIVENT diverger sur au moins une transition
+    assert not torch.allclose(q_next_dqn, q_next_double), (
+        "Double DQN doit différer de DQN classique quand online ≠ target"
+    )

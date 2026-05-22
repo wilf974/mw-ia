@@ -42,6 +42,7 @@ class _ConvDQNTrainer:
         gamma: float = 0.99,
         device: str = "cuda",
         use_amp: bool = True,
+        double_dqn: bool = True,
     ) -> None:
         self.online = online
         self.target = target
@@ -51,6 +52,7 @@ class _ConvDQNTrainer:
         self.gamma = gamma
         self.device = torch.device(device)
         self.use_amp = bool(use_amp and self.device.type == "cuda")
+        self.double_dqn = double_dqn
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=lr)
         self.loss_fn = nn.SmoothL1Loss()
         self._scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -79,7 +81,15 @@ class _ConvDQNTrainer:
         with torch.amp.autocast(device_type="cuda", enabled=self.use_amp):
             q_pred = self.online(states).gather(1, actions.view(-1, 1)).squeeze(1)
             with torch.no_grad():
-                q_next = self.target(next_states).max(dim=1).values
+                if self.double_dqn:
+                    # V2-W : online sélectionne, target évalue (Hasselt 2015)
+                    next_actions = self.online(next_states).argmax(dim=1)
+                    q_next = self.target(next_states).gather(
+                        1, next_actions.view(-1, 1)
+                    ).squeeze(1)
+                else:
+                    # V2-Z baseline : target sélectionne ET évalue (DQN classique)
+                    q_next = self.target(next_states).max(dim=1).values
                 target_q = rewards + self.gamma * q_next * (1.0 - dones)
             loss = self.loss_fn(q_pred, target_q)
 
@@ -135,6 +145,7 @@ class ConvDQNAgent:
             in_channels=in_channels, rows=rows, cols=cols,
             lr=cfg.lr, gamma=cfg.gamma,
             device=str(self.device), use_amp=cfg.use_amp,
+            double_dqn=cfg.double_dqn,
         )
         obs_dim = in_channels * rows * cols
         self.buffer = ReplayBuffer(cfg.replay_capacity, obs_dim, seed=seed)
