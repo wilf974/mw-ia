@@ -69,7 +69,7 @@ class RunnerCallbacks:
         if self.on_difficulty_updated:
             self.on_difficulty_updated(**kw)
 
-    def fire_assessment(self, **kw: object) -> None:
+    def fire_evaluation(self, **kw: object) -> None:
         if self.on_eval:
             self.on_eval(**kw)
 
@@ -582,7 +582,7 @@ class ConvProceduralDQNRunner(_BaseRunner):
             ):
                 assessment_metrics = self.evaluator.evaluate(self.agent, self.scheduler.current)
                 improved = self.best_tracker.update(assessment_metrics, self.agent, episode=ep)
-                self.callbacks.fire_assessment(
+                self.callbacks.fire_evaluation(
                     ep=ep,
                     eval_winrate=assessment_metrics["winrate"],
                     eval_diff=assessment_metrics["difficulty"],
