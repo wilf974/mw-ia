@@ -292,6 +292,67 @@ python scripts/train_drqn_procedural.py --episodes 5000 --mode obstacles --devic
 3. **`conv_channels=(32, 64)` peut être overkill** : 99% des params dans FC1. Tester `--conv-channels 16 32` voire `8 16` post-livraison.
 4. **Scheduler `update=200` peut être trop patient pour CNN** : à confirmer empiriquement vs `--scheduler-update-interval 100` (intermédiaire entre V2-X 200 et V2-Y 50).
 
+### V2-Z — baseline CNN empirique 5000 ép (2026-05-22)
+
+**Validation empirique post-livraison** : 1 run GPU 5000 ép obstacles, seed=0, defaults V2-Z (`--conv-channels 32 64 --fc-hidden 256 --epsilon-decay-steps 200000 --scheduler-update-interval 200 --scheduler-step 0.05`).
+
+**Résultat consolidé** :
+- **Final winrate : 54 % @ diff=0.10** (bucket 0, 54/100 derniers épisodes)
+- ε final : 0.050 (decay saturé dès ~ep 4000)
+- Bucket 1+ : vide (le tracker route sur `min(4, int(diff*5))` donc tout reste en bucket 0 jusqu'à diff≥0.20)
+
+**Trajectoire scheduler** :
+
+| Étape | Ép | Action scheduler | Winrate au moment du switch |
+|---|---|---|---|
+| 1 | 400 | diff 0.00 → 0.05 (up) | 96 % |
+| 2 | 800 | diff 0.05 → 0.10 (up) | 85 % |
+| 3 | 800-5000 | Stagne à diff=0.10 | Oscille 44-54 %, ni ≥80 % ni ≤30 % |
+
+**Comparaison inter-archis (mêmes env, mêmes 5000 ép, recette CLI gagnante de chaque)** :
+
+| Variante | Final winrate | Final diff | Franchit diff=0.05 → 0.10 ? |
+|---|---|---|---|
+| V2-X MLP `(256, 256)` (2000 ép) | 72 % | 0.05 | ❌ plafonné |
+| V2-Y LSTM `fc=256, lstm=128` (5000 ép) | 95 % | 0.05 | ❌ plafonné (meilleur winrate au même palier) |
+| **V2-Z CNN `(32, 64)` (5000 ép)** | **54 %** | **0.10** | **✅ premier sous-projet à franchir** |
+
+**Trajectoire 500 ép preview (même run, début de la courbe)** :
+- ep 0-100 : 20 → 35 % @ diff=0.00 (exploration chaotique)
+- ep 100-400 : 35 → 96 % @ diff=0.00 (apprentissage rapide)
+- ep 400 : scheduler tire diff=0.05 (winrate 96 % > seuil 80 %)
+- ep 500 : 78 % @ diff=0.05 (déjà comparable à V2-X 72 % @ 2000 ép — **4× plus sample-efficient**)
+
+**Finding architectural consolidé** :
+
+> Le bottleneck principal V2-X/V2-Y n'était PAS la mémoire mais **la représentation spatiale**. V2-X (MLP 1D) et V2-Y (LSTM sur 1D) plafonnent au même palier de difficulté. V2-Z (CNN 2D) franchit ce palier avec moins d'épisodes pour atteindre le winrate équivalent. La perception spatiale (translation equivariance + localité des kernels) débloque la généralisation curriculum.
+
+**Second bottleneck identifié (à diff=0.10)** : V2-Z stagne à 54 % winrate à diff=0.10. Symptômes :
+- Policy oscille 44-54 % sans converger
+- Scheduler bloqué (ni up ni down)
+- ε saturé à 0.05 mais aucun progrès marginal
+- Pattern classique de **surestimation Q-values DQN** (Hasselt 2015) — agent fait des choix sur-optimistes que la réalité ne soutient pas
+
+**Recommandation prochaine session — V2-W Double DQN sur CNN** :
+
+Modifier `_ConvDQNTrainer.step()` (~30 LOC) pour découpler sélection d'action (online net) et évaluation (target net) :
+
+```python
+# Avant (V2-Z) :
+q_next = self.target(next_states).max(dim=1).values
+
+# Après (V2-W) :
+next_actions = self.online(next_states).argmax(dim=1)        # sélection : online
+q_next = self.target(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)  # éval : target
+```
+
+Hypothèse V2-W : réduire la surestimation devrait permettre au CNN de franchir diff=0.10 → 0.15+ et idéalement remplir le bucket 1 (0.2-0.4) à ≥70 %, atteignant ainsi le critère succès strict spec V2-X.
+
+**Reproductibilité à valider** : 1 seul run avec seed=0 — pour confirmer le finding, lancer 2-3 runs avec seeds différentes (`--seed 1`, `--seed 2`) et observer si :
+1. La transition diff=0.05 → 0.10 a toujours lieu autour de ep 800-1500
+2. Le plafond à diff=0.10 reste autour de 50-60 % winrate
+3. La variance inter-seeds est sous ±5 pp (cf. pattern V2-Y)
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
@@ -579,16 +640,16 @@ Attendu : `passed=True, violations=0`. Avec `gamma=1.0` : `passed=False, violati
 
 ### Reprise par défaut — attaquer un nouveau sous-projet
 
-V2-A, V2-X, V2-Y ET V2-Z (CNN) étant terminés, la **suite naturelle est Double DQN ou CNN-LSTM combiné** :
+V2-A, V2-X, V2-Y ET V2-Z (CNN) étant terminés ET la baseline V2-Z validée empiriquement 1 run 5000 ép GPU (54 % @ diff=0.10, **premier sous-projet à franchir le plafond V2-X/V2-Y**), la **suite naturelle est V2-W Double DQN sur CNN** :
 
 **Diagnostic empirique fin de session 2026-05-22** :
-> V2-Z (CNN perception spatiale) livré tag `v0.2.0-z`, 208 tests verts. Validation empirique 5000 ép à mener post-livraison pour confirmer le critère succès (match V2-Y @ diff=0.05 + franchir diff=0.10). Si CNN+scheduler V2-X plafonne aussi à diff=0.05, le bottleneck est l'objectif d'apprentissage (Q-values surestimation), pas la représentation.
+> V2-Z CNN livré tag `v0.2.0-z` + run 5000 ép GPU consolidé : **franchit diff=0.05 → 0.10** (V2-X et V2-Y plafonnaient à 0.05). Plafond résiduel à diff=0.10 (winrate 44-54 %, scheduler bloqué). Symptôme classique de surestimation Q-values DQN → cible naturelle = Double DQN. Cf. section "V2-Z — baseline CNN empirique 5000 ép" pour les détails.
 
 **Prochaines étapes possibles** (priorité à débrainstormer en session fraîche) :
 
-1. **V2-W : Double DQN (roadmap #7) — recommandé** : ~30 LOC modif `_ConvDQNTrainer.step()` pour découpler sélection d'action (online net) et évaluation (target net). Réduit surestimation Q-values. Particulièrement utile si V2-Z plafonne aussi.
-2. **V2-ZY : CNN-LSTM combiné** : sous-projet hybride V2-Z + V2-Y. ConvLSTM ou Conv→LSTM stacked. Plus ambitieux mais teste les deux axes ensemble.
-3. **Validation empirique V2-Z d'abord** : avant de partir sur un nouveau sous-projet, lancer 2 entraînements 5000 ép GPU avec defaults V2-Z et documenter les résultats dans CLAUDE.md. Décision basée sur outcome.
+1. **V2-W : Double DQN sur ConvDQN (roadmap #7) — RECOMMANDÉ** : ~30 LOC modif `_ConvDQNTrainer.step()` pour découpler sélection (online net) et évaluation (target net). Hypothèse : réduire surestimation Q-values débloque diff=0.10 → 0.15+ et permet de remplir bucket 1 (0.2-0.4) à ≥70 %. Pattern V2-Y-style livraison : nouveau `_DoubleConvDQNTrainer` + flag CLI + tests TDD + tag `v0.2.0-w`.
+2. **Reproductibilité V2-Z avant V2-W** : 2 runs supplémentaires `--seed 1` et `--seed 2` pour confirmer que la transition diff=0.05 → 0.10 est reproductible (variance inter-seeds attendue ±5 pp). Permet de baseliner avant l'ablation V2-W.
+3. **V2-ZY : CNN-LSTM combiné** : sous-projet hybride V2-Z + V2-Y (ConvLSTM ou Conv→LSTM stacked). Plus ambitieux mais teste les deux axes ensemble. À garder en réserve si V2-W ne suffit pas.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
