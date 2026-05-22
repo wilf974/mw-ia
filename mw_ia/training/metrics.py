@@ -23,6 +23,7 @@ class MetricsTracker:
         self._success_window: Deque[bool] = deque(maxlen=cfg.winrate_window)
         self._reward_history: list[float] = []
         self._length_history: list[int] = []
+        self._loss_history: list[float] = []
         self.best_reward: float = float("-inf")
         self.last_loss: float | None = None
         self.last_epsilon: float | None = None
@@ -30,6 +31,14 @@ class MetricsTracker:
     @property
     def total_episodes(self) -> int:
         return len(self._reward_history)
+
+    @property
+    def episode_rewards(self) -> list[float]:
+        return self._reward_history
+
+    @property
+    def losses(self) -> list[float]:
+        return self._loss_history
 
     def record_episode(self, reward: float, length: int, *, success: bool) -> None:
         self._success_window.append(success)
@@ -40,6 +49,7 @@ class MetricsTracker:
 
     def record_loss(self, loss: float) -> None:
         self.last_loss = loss
+        self._loss_history.append(loss)
 
     def record_epsilon(self, eps: float) -> None:
         self.last_epsilon = eps
