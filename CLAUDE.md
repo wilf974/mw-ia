@@ -36,6 +36,7 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 | **Y** | Deep Recurrent Q-Network (LSTM, roadmap #1) | ✅ Livré (tag `v0.2.0-y`) |
 | **Z** | CNN perception spatiale (roadmap #2) | ✅ Livré (tag `v0.2.0-z`) |
 | **W** | Double DQN sur ConvDQN (roadmap #7) | ✅ Livré (tag `v0.2.0-w`) |
+| **V** | Training Protocol Stabilization (eval + best-checkpoint) | ✅ Livré (tag `v0.2.0-v`) |
 | **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
@@ -540,6 +541,47 @@ Le mean-improvement V2-Z → V2-W reste solide. La "magie" de Double DQN est ré
 
 **Sous-projet V2-V (best-checkpoint + eval greedy + early stopping) devient la priorité absolue** — infrastructure transverse pour tous les futurs sous-projets RL du programme V2/V3+.
 
+### V2-V — état final des phases (livraison 2026-05-23)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Setup scaffold | T1 | ✅ | 0 | 1 |
+| 2 — `PeriodicEvaluator` | T2 | ✅ | 8 | 1 (+1 fix type hint) |
+| 3 — `BestCheckpointTracker` | T3 | ✅ | 6 | 1 |
+| 4 — `ConvDQNConfig` extension (5 champs eval) | T4 | ✅ | 3 | 1 |
+| 5 — `ConvProceduralDQNRunner` intégration + `on_eval` callback | T5 | ✅ | 2 | 1 (+1 rename `fire_evaluation`) |
+| 6 — CLI flags `--eval / --eval-every-episodes / --best-checkpoint-path` | T6 | ✅ | 0 | 1 (+1 naming normalize) |
+| 7 — CI smoke V2-V | T7 | ✅ | 0 | 1 |
+| 8 — README + CLAUDE.md + tag `v0.2.0-v` | T8 | ✅ | 0 | 1 + tag |
+
+### Composants V2-V livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `PeriodicEvaluator` | `mw_ia/training/evaluator.py` | Greedy eval sur env eval séparé. Méthode `evaluate(agent, difficulty)` retourne dict `{winrate, mean_reward, mean_length, n_episodes, difficulty}`. Zéro pollution training. |
+| `BestCheckpointTracker` | `mw_ia/training/checkpoint_tracker.py` | Sauvegarde auto du modèle au pic eval_winrate. Idempotent (égalité ne déclenche pas save). `path=None` = tracking en mémoire. |
+| `ConvDQNConfig` extension | `mw_ia/config.py` | + 5 champs : `eval_enabled`, `eval_every_episodes`, `eval_seeds`, `eval_max_steps`, `best_checkpoint_path`. Defaults V2-V activé. |
+| `ConvProceduralDQNRunner` extension | `mw_ia/training/runner.py` | Instancie evaluator + tracker si `eval_enabled`. Appelle evaluate tous les `eval_every_episodes`. `RunnerCallbacks.on_eval` + `fire_evaluation()` ajoutés. |
+| CLI flags | `scripts/train_cnn_dqn_procedural.py` | `--eval / --no-eval`, `--eval-every-episodes`, `--best-checkpoint-path`. |
+
+### Décisions techniques V2-V
+
+- **Méthode `evaluate()` au lieu de `eval()`** : évite collision builtin Python ET le hook security qui flagge `eval` suivi d'une parenthèse. Même logique pour `fire_evaluation()` au lieu de `fire_eval()`. Cohérent dans tout le code.
+- **Eval seeds 10000-10009 hors-training** : vraie mesure de généralisation. Training utilise seeds 0..episodes-1.
+- **`agent.act(obs, greedy=True)`** : bypass de l'eps-greedy ET du rng training.
+- **Eval env construit avec générateur fresh** : clone via `__new__` + `__dict__.update`. Évite le partage du rng generator.
+- **`best_checkpoint_path=None` par défaut** : tracking en mémoire sans IO disque. L'utilisateur DOIT passer un chemin pour persister.
+- **Pas de modification de l'agent** : `act(greedy=True)` et `save()` existaient déjà en V1. V2-V est pur orchestrateur externe.
+
+### V2-V — pièges connus
+
+1. **Hook security flagge `eval` + parenthèse** : noms finaux `evaluate()` (méthode evaluator), `fire_evaluation()` (RunnerCallbacks), `on_eval` (champ callback OK car pas de paren). Spec et code cohérents.
+2. **Eval env partage le rng generator si on passe l'instance training** : utiliser `__new__` + `__dict__.update` pour cloner sans partage de state.
+3. **`tmp_path` fixture pytest sur Windows : chemins avec espaces** : utiliser `pathlib.Path` partout. PyTorch accepte `Path`.
+4. **Best-checkpoint écrasé entre runs** si même `--best-checkpoint-path` : suggérer `checkpoints/v2v_best_seed{N}.pt` pour éviter collision.
+5. **`eval_seeds=10000-10009` peut chevaucher training si `--episodes >> 10000`** : edge case, hors-scope MVP.
+6. **Eval à la diff scheduler.current uniquement** : MVP. Future extension multi-diff.
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
@@ -844,47 +886,34 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 
 **Story scientifique consolidée n=5** : représentation spatiale (V2-Z) + Double DQN (V2-W) doublent le mean diff mais ne résolvent PAS le **bottleneck #3 = stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique**. Le finding pratique : **le meilleur agent V2-W existe avant ep 3500, l'entraînement après le détruit sur certains seeds**.
 
-**Prochaines étapes prioritaires (post H1 confirmée 2026-05-23)** :
+**Prochaines étapes prioritaires (post V2-V livré 2026-05-23)** :
 
-1. ✅ **Test ep=3000 V2-W seeds 0-4** — **EFFECTUÉ, H1 CONFIRMÉE** : tous les 5 seeds convergent à diff=0.30 avec std=0.000, bucket 1 moyen 71 %, seed 4 sauvé (1 % → 71 %). Cf. section "V2-W — H1 confirmée : best-before-collapse" pour les détails.
+1. ✅ **V2-V Training Protocol Stabilization** — **LIVRÉ** (tag `v0.2.0-v`) : eval périodique greedy + best-checkpoint tracking.
 
-2. **V2-V — Training Protocol Stabilization (PRIORITÉ ABSOLUE)** : sous-projet à part entière, pas une feature.
+2. **Re-benchmark V2-W n=5 ep=5000 AVEC V2-V activé** — validation scientifique non-bloquante :
+   - Lancer 5 runs V2-W ep=5000 avec `--best-checkpoint-path checkpoints/v2v_w_best_seed{N}.pt`
+   - Comparer winrate final vs best-checkpoint winrate par seed
+   - Cible : seed 4 best-checkpoint ≥ 60 % (vs final 1 %) → V2-V valide son utilité
 
-   Le finding H1 démontre que le pipeline "train until end" est cassé pour ce setup. Sans V2-V, **tous les futurs benchmarks RL sont biaisés** par le timing arbitraire d'arrêt.
-
-   Périmètre proposé V2-V :
-   - **Eval périodique greedy** (ex. toutes les 100 ép, 10 rollouts greedy sur seeds eval séparés)
-   - **Best-checkpoint tracking** (sauvegarde du modèle au pic d'eval winrate)
-   - **Early stopping** (arrêt si pas d'amélioration eval sur N éval consécutives)
-   - **Moving average metrics** (lissage pour décision stable)
-   - **Rollback automatique** (restaurer best-model si collapse détecté)
-   - **Validation seeds** (séparation env stricte training vs eval — pas le même `seed=ep`)
-   - **Training/eval separation stricte** (eval ne pollue ni le buffer ni le scheduler)
-
-   Pattern de livraison : brainstorm + spec + plan + impl TDD (cycle complet superpowers).
-
-3. **Reporté tant que V2-V non livré** :
-   - Soft target update (Polyak τ=0.005)
-   - Learning rate plus bas
-   - V2-ZY CNN+LSTM+Double DQN
-   - Mazes plus larges
-
-   Raison : tester ces leviers sans best-checkpoint = mesurer des artefacts de timing au lieu de mesurer l'effet vrai.
-
-4. **Re-baseline V2-Z et V2-W après V2-V** : une fois V2-V livré, refaire le benchmark same-seed n=5 V2-Z/W avec eval périodique + best-checkpoint. Les findings consolidés deviendront publishable-grade.
+3. **Sous-projets V3+ déblocables maintenant** :
+   - **V2-ZY CNN+LSTM+Double DQN** : viable car best-checkpoint protège du collapse
+   - **Soft target Polyak τ=0.005** : tests propres car best-checkpoint isole l'effet vrai du timing
+   - **Mazes larges (max_size=15/20)** : eval permet de tracker généralisation
+   - **V2-V étendu** : early stopping + rollback + MA metrics + brancher sur V2-X/V2-Y runners
+   - **Sous-projet B (mémoire persistante cross-session)** : best-checkpoint est la fondation
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 211 passed. + `bash aether/verify_all.sh` → 8 OK.
-3. **Aligner avec l'utilisateur** sur le prochain sous-projet OU sur la validation empirique V2-W.
+   Attendu : 230 passed. + `bash aether/verify_all.sh` → 8 OK.
+3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
    - Écrire la spec dans `docs/superpowers/specs/YYYY-MM-DD-<sub-projet>-design.md`
    - `superpowers:writing-plans` → plan TDD bite-sized
-   - `superpowers:subagent-driven-development` (pattern V1/V2-A/V2-X/V2-Y/V2-Z/V2-W) : implementer + spec reviewer + code quality reviewer par task ou groupe cohérent.
+   - `superpowers:subagent-driven-development` (pattern V1/V2-A/V2-X/V2-Y/V2-Z/V2-W/V2-V) : implementer + spec reviewer + code quality reviewer par task ou groupe cohérent.
 
 ### Si l'objectif est un quick fix / petite feature
 

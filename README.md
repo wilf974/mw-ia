@@ -328,6 +328,41 @@ branche conditionnelle dans `_ConvDQNTrainer.step()`, exposition CLI via
 Le bouton "Démarrer (procedural CNN)" utilise `ConvDQNConfig()` par défaut, donc
 V2-W (Double DQN) est activé automatiquement. Pas de nouveau bouton.
 
+## V2-V — Training Protocol Stabilization (sous-projet livré)
+
+**Tag** : `v0.2.0-v` — **Tests** : 230 verts (211 baseline + 19 V2-V)
+
+Motivation : H1 confirmée 2026-05-23 — sur V2-W seed 4, le winrate passe de 1 % (ep=5000) à 71 % (ep=3000). Le pipeline "train until end" est cassé : on jette littéralement le meilleur agent entraîné.
+
+V2-V ajoute :
+- **Évaluation périodique greedy** sur 10 seeds eval séparés du training (seeds 10000-10009)
+- **Best-checkpoint tracking** : sauvegarde automatique du modèle au pic d'eval_winrate
+
+### Usage CLI
+
+```bash
+# V2-V par défaut (eval activé, sans sauvegarde disque)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+
+# Avec sauvegarde du best-checkpoint
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --best-checkpoint-path checkpoints/v2v_best_seed0.pt
+
+# Reproduire baseline pre-V2-V (sans eval)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda --no-eval
+```
+
+### Architecture
+
+- `mw_ia/training/evaluator.py::PeriodicEvaluator` — env eval séparé, méthode `evaluate(agent, difficulty)` qui ne pollue ni le buffer ni le scheduler
+- `mw_ia/training/checkpoint_tracker.py::BestCheckpointTracker` — sauvegarde au pic d'eval_winrate (idempotent, path=None = tracking en mémoire)
+- `ConvDQNConfig` étendu : `eval_enabled`, `eval_every_episodes`, `eval_seeds`, `eval_max_steps`, `best_checkpoint_path`
+- `ConvProceduralDQNRunner` intègre evaluator + tracker via `eval_enabled=True`
+
+### Overhead
+
+~10 % de temps d'entraînement en plus (10 seeds eval × 200 max_steps / 100 ép training = ~100 ms / ép). Compensation : récupération du best-model qui aurait été détruit par le late-stage collapse.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
