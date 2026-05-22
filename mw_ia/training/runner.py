@@ -12,7 +12,8 @@ import numpy as np
 
 from mw_ia.agents.dqn import DQNAgent
 from mw_ia.agents.q_learning import QLearningAgent, Transition
-from mw_ia.config import DQNConfig, ProceduralEnvConfig, QLearningConfig, SchedulerConfig, TrainingConfig
+from mw_ia.agents.recurrent_dqn import RecurrentDQNAgent
+from mw_ia.config import DQNConfig, DRQNConfig, ProceduralEnvConfig, QLearningConfig, SchedulerConfig, TrainingConfig
 from mw_ia.envs.gridworld import GridWorld
 from mw_ia.envs.procedural_env import ProceduralGridWorld, encode_procedural_observation
 from mw_ia.training.metrics import DifficultyBucketTracker, MetricsTracker
@@ -295,6 +296,108 @@ class ProceduralDQNRunner(_BaseRunner):
                 state = s2
                 ep_reward += r
                 ep_len += 1
+
+            self.metrics.record_episode(ep_reward, ep_len, success=terminated)
+            self.bucket_tracker.record_episode(
+                success=terminated, reward=ep_reward, length=ep_len, difficulty=difficulty,
+            )
+            self.callbacks.fire_episode(ep=ep, reward=ep_reward, length=ep_len, success=terminated)
+
+            if (ep + 1) % self.sched_cfg.update_interval == 0:
+                new_diff = self.scheduler.update(winrate=self.metrics.winrate())
+                self.callbacks.fire_difficulty_updated(difficulty=new_diff, episode_id=ep)
+
+            if ep % self.train_cfg.log_every_episodes == 0:
+                self.callbacks.fire_log(
+                    "info",
+                    f"ep {ep:>4}  R={ep_reward:+.2f}  L={ep_len:>3}  "
+                    f"eps={self.agent.epsilon:.3f}  winrate={self.metrics.winrate():.2%}  "
+                    f"diff={self.scheduler.current:.2f}"
+                )
+
+
+class RecurrentProceduralDQNRunner(_BaseRunner):
+    """Boucle DRQN sur environnement procédural avec curriculum adaptatif.
+
+    Différences avec ProceduralDQNRunner V2-X :
+    - Agent récurrent (LSTM) au lieu de DQN feedforward
+    - Hidden state runtime reset à chaque épisode (agent.reset_hidden())
+    - Train step à la FIN de l'épisode (agent.end_episode()), pas à chaque step
+    - Observation et callbacks GUI identiques V2-X
+    """
+
+    def __init__(
+        self,
+        *,
+        env: ProceduralGridWorld,
+        proc_cfg: ProceduralEnvConfig,
+        drqn_cfg: DRQNConfig,
+        sched_cfg: SchedulerConfig,
+        train_cfg: TrainingConfig,
+        callbacks: RunnerCallbacks,
+        device: str = "cuda",
+        seed: int = 0,
+    ) -> None:
+        super().__init__(train_cfg, callbacks)
+        self.env = env
+        self.proc_cfg = proc_cfg
+        self.drqn_cfg = drqn_cfg
+        self.sched_cfg = sched_cfg
+        self.scheduler = AdaptiveDifficultyScheduler(sched_cfg)
+        self.bucket_tracker = DifficultyBucketTracker(train_cfg)
+        obs_dim = 2 * proc_cfg.max_rows * proc_cfg.max_cols
+        self.agent = RecurrentDQNAgent(
+            obs_dim=obs_dim, n_actions=4, cfg=drqn_cfg, device=device, seed=seed,
+        )
+
+    def run(self) -> None:
+        self.callbacks.fire_log(
+            "info",
+            f"Recurrent DQN ({self.proc_cfg.mode}) sur {self.agent.device} démarrage"
+        )
+        for ep in range(self.drqn_cfg.episodes):
+            if self._stop:
+                return
+
+            self.env.set_difficulty(self.scheduler.current)
+            state, info = self.env.reset(seed=ep)
+            maze = info["maze"]
+            difficulty = info["difficulty"]
+            self.callbacks.fire_maze_changed(maze=maze, episode_id=ep, difficulty=difficulty)
+
+            self.agent.reset_hidden()
+            self.agent.begin_episode()
+
+            ep_reward = 0.0
+            ep_len = 0
+            terminated = truncated = False
+            while not (terminated or truncated) and ep_len < self.drqn_cfg.max_steps_per_episode:
+                if self._stop:
+                    return
+                while self._paused and not self._stop:
+                    pass
+                obs = encode_procedural_observation(
+                    state=state, grid=maze,
+                    max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                )
+                a = self.agent.act(obs)
+                s2, r, terminated, truncated, _ = self.env.step(a)
+                next_obs = encode_procedural_observation(
+                    state=s2, grid=maze,
+                    max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                )
+                self.agent.observe(obs, a, r, next_obs, terminated or truncated)
+                self.callbacks.fire_step(state=state, action=a, reward=r, next_state=s2)
+                state = s2
+                ep_reward += r
+                ep_len += 1
+
+            m = self.agent.end_episode()
+            if "loss" in m:
+                self.metrics.record_loss(m["loss"])
+                self.callbacks.fire_loss(self.agent.global_step, m["loss"])
+            self.callbacks.fire_epsilon(self.agent.global_step, m["epsilon"])
+            self.metrics.record_epsilon(m["epsilon"])
 
             self.metrics.record_episode(ep_reward, ep_len, success=terminated)
             self.bucket_tracker.record_episode(

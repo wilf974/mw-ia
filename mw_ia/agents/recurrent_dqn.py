@@ -112,7 +112,7 @@ class RecurrentDQNAgent(Agent):
         if self._episode_trajectory:
             self.buffer.push_trajectory(self._episode_trajectory)
         metrics: dict[str, float] = {"epsilon": self.epsilon}
-        if len(self.buffer) >= self.cfg.min_episodes_to_learn:
+        if len(self.buffer) >= max(self.cfg.min_episodes_to_learn, self.cfg.batch_size):
             losses: list[float] = []
             for _ in range(self.cfg.train_steps_per_episode):
                 batch = self.buffer.sample(
