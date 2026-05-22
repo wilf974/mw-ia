@@ -48,3 +48,78 @@ def test_bfs_start_out_of_grid_raises():
     grid = np.zeros((5, 5), dtype=bool)
     with pytest.raises(AssertionError):
         maze_bfs_check(grid, start=(-1, 0), goal=(4, 4))
+
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+from mw_ia.envs.maze_generators import RandomObstaclesGenerator
+
+
+def _gen() -> RandomObstaclesGenerator:
+    # max_density=0.40 : à density=0.40 sur 10x10, ~10.8% de mazes solvables par tirage
+    # → avec max_attempts=100, probabilité de succès ≈ 99.9% (fiable pour les tests).
+    # max_density=0.50 produirait ~0.6% de succès → RuntimeError fréquent sur seed fixe.
+    return RandomObstaclesGenerator(
+        rows=10, cols=10, start=(0, 0), goal=(9, 9),
+        min_density=0.10, max_density=0.40, max_attempts=100,
+    )
+
+
+def test_random_obstacles_density_zero():
+    gen = _gen()
+    grid = gen.generate(seed=42, difficulty=0.0)
+    # density interpolated to min_density=0.10 (0.0 difficulty → 10% obstacles)
+    # On 10x10 = 100 cells, ~10 obstacles. On vérifie présence non-nulle et borne haute.
+    n_obstacles = int(grid.sum())
+    assert 0 < n_obstacles <= 15
+
+
+def test_random_obstacles_density_max():
+    gen = _gen()
+    grid = gen.generate(seed=42, difficulty=1.0)
+    # difficulty=1.0 → max_density=0.40 → ~40 obstacles
+    n_obstacles = int(grid.sum())
+    assert 30 <= n_obstacles <= 42
+
+
+def test_random_obstacles_seed_deterministic():
+    gen = _gen()
+    g1 = gen.generate(seed=42, difficulty=0.5)
+    g2 = gen.generate(seed=42, difficulty=0.5)
+    assert np.array_equal(g1, g2)
+
+
+def test_random_obstacles_start_goal_never_obstacle():
+    gen = _gen()
+    for seed in range(50):
+        grid = gen.generate(seed=seed, difficulty=0.5)
+        assert grid[0, 0] == False, f"seed={seed}: start sur obstacle"
+        assert grid[9, 9] == False, f"seed={seed}: goal sur obstacle"
+
+
+def test_random_obstacles_always_solvable():
+    gen = _gen()
+    for seed in range(50):
+        grid = gen.generate(seed=seed, difficulty=0.5)
+        assert maze_bfs_check(grid, start=(0, 0), goal=(9, 9)), \
+            f"seed={seed}: maze non solvable"
+
+
+def test_random_obstacles_pathological_density_raises():
+    # max_density=0.95 → quasi-aucun chemin possible avec start=(0,0), goal=(9,9)
+    gen = RandomObstaclesGenerator(
+        rows=10, cols=10, start=(0, 0), goal=(9, 9),
+        min_density=0.95, max_density=0.95, max_attempts=10,
+    )
+    with pytest.raises(RuntimeError, match="unreachable after"):
+        gen.generate(seed=42, difficulty=0.5)
+
+
+@given(seed=st.integers(min_value=0, max_value=10_000))
+@settings(max_examples=50, deadline=None)
+def test_random_obstacles_property_solvability(seed: int):
+    """Property : tout maze généré est solvable."""
+    gen = _gen()
+    grid = gen.generate(seed=seed, difficulty=0.5)
+    assert maze_bfs_check(grid, start=(0, 0), goal=(9, 9))
