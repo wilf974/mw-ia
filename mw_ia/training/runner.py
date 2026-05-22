@@ -12,9 +12,11 @@ import numpy as np
 
 from mw_ia.agents.dqn import DQNAgent
 from mw_ia.agents.q_learning import QLearningAgent, Transition
-from mw_ia.config import DQNConfig, QLearningConfig, TrainingConfig
+from mw_ia.config import DQNConfig, ProceduralEnvConfig, QLearningConfig, SchedulerConfig, TrainingConfig
 from mw_ia.envs.gridworld import GridWorld
-from mw_ia.training.metrics import MetricsTracker
+from mw_ia.envs.procedural_env import ProceduralGridWorld, encode_procedural_observation
+from mw_ia.training.metrics import DifficultyBucketTracker, MetricsTracker
+from mw_ia.training.scheduler import AdaptiveDifficultyScheduler
 
 
 StepCb = Callable[..., None]
@@ -31,6 +33,8 @@ class RunnerCallbacks:
     on_loss: LossCb | None = None
     on_epsilon: EpsilonCb | None = None
     on_log: LogCb | None = None
+    on_maze_changed: Callable[..., None] | None = None
+    on_difficulty_updated: Callable[..., None] | None = None
 
     def fire_step(self, **kw: object) -> None:
         if self.on_step:
@@ -51,6 +55,14 @@ class RunnerCallbacks:
     def fire_log(self, level: str, msg: str) -> None:
         if self.on_log:
             self.on_log(level, msg)
+
+    def fire_maze_changed(self, **kw: object) -> None:
+        if self.on_maze_changed:
+            self.on_maze_changed(**kw)
+
+    def fire_difficulty_updated(self, **kw: object) -> None:
+        if self.on_difficulty_updated:
+            self.on_difficulty_updated(**kw)
 
 
 class _BaseRunner:
@@ -184,4 +196,120 @@ class DQNRunner(_BaseRunner):
                     "info",
                     f"ep {ep:>4}  R={ep_reward:+.2f}  L={ep_len:>3}  "
                     f"eps={self.agent.epsilon:.3f}  winrate={self.metrics.winrate():.2%}",
+                )
+
+
+class ProceduralDQNRunner(_BaseRunner):
+    """Boucle DQN sur environnement procédural avec curriculum adaptatif.
+
+    Différences avec DQNRunner V1 :
+    - env régénère le maze à chaque reset()
+    - observation = position_one_hot + grid_flatten (dim 2*max_rows*max_cols)
+    - scheduler adapte la difficulté toutes les update_interval épisodes
+    - bucket_tracker route les épisodes par bucket de difficulté
+    - callbacks GUI étendus : on_maze_changed, on_difficulty_updated
+
+    NOTE : le replay buffer mélange volontairement transitions inter-épisodes.
+    C'est précisément le but du curriculum : apprendre une politique générale,
+    pas une politique map-spécifique.
+    """
+
+    def __init__(
+        self,
+        *,
+        env: ProceduralGridWorld,
+        proc_cfg: ProceduralEnvConfig,
+        dqn_cfg: DQNConfig,
+        sched_cfg: SchedulerConfig,
+        train_cfg: TrainingConfig,
+        callbacks: RunnerCallbacks,
+        device: str = "cuda",
+        seed: int = 0,
+    ) -> None:
+        super().__init__(train_cfg, callbacks)
+        self.env = env
+        self.proc_cfg = proc_cfg
+        self.dqn_cfg = dqn_cfg
+        self.sched_cfg = sched_cfg
+        self.scheduler = AdaptiveDifficultyScheduler(sched_cfg)
+        self.bucket_tracker = DifficultyBucketTracker(train_cfg)
+        # Observation dim = 2 * max_rows * max_cols (one-hot pos + grid flatten)
+        obs_dim = 2 * proc_cfg.max_rows * proc_cfg.max_cols
+        # DQNAgent attend un env avec n_states/n_actions ; on adapte
+        # en injectant directement obs_dim via un objet léger.
+        self.agent = self._make_agent(obs_dim=obs_dim, device=device, seed=seed)
+
+    def _make_agent(self, *, obs_dim: int, device: str, seed: int) -> "DQNAgent":
+        """Construit un DQNAgent qui consomme des observations de dim obs_dim.
+
+        Hack léger : DQNAgent V1 dérive obs_dim de env.n_states. On bypass en
+        wrappant l'env procedural dans un objet exposant n_states=obs_dim et
+        n_actions=4.
+        """
+        class _ObsDimEnv:
+            n_states = obs_dim
+            n_actions = 4
+
+        return DQNAgent(_ObsDimEnv(), self.dqn_cfg, device=device, seed=seed)
+
+    def run(self) -> None:
+        self.callbacks.fire_log(
+            "info",
+            f"Procedural DQN ({self.proc_cfg.mode}) sur {self.agent.device} démarrage"
+        )
+        for ep in range(self.dqn_cfg.episodes):
+            if self._stop:
+                return
+
+            self.env.set_difficulty(self.scheduler.current)
+            state, info = self.env.reset(seed=ep)
+            maze = info["maze"]
+            difficulty = info["difficulty"]
+            self.callbacks.fire_maze_changed(maze=maze, episode_id=ep, difficulty=difficulty)
+
+            ep_reward = 0.0
+            ep_len = 0
+            terminated = truncated = False
+            while not (terminated or truncated) and ep_len < self.dqn_cfg.max_steps_per_episode:
+                if self._stop:
+                    return
+                while self._paused and not self._stop:
+                    pass
+                obs = encode_procedural_observation(
+                    state=state, grid=maze,
+                    max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                )
+                a = self.agent.act(obs)
+                s2, r, terminated, truncated, _ = self.env.step(a)
+                next_obs = encode_procedural_observation(
+                    state=s2, grid=maze,
+                    max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                )
+                m = self.agent.observe(obs, a, r, next_obs, terminated or truncated)
+                if "loss" in m:
+                    self.metrics.record_loss(m["loss"])
+                    self.callbacks.fire_loss(self.agent.global_step, m["loss"])
+                self.callbacks.fire_epsilon(self.agent.global_step, m["epsilon"])
+                self.metrics.record_epsilon(m["epsilon"])
+                self.callbacks.fire_step(state=state, action=a, reward=r, next_state=s2)
+                state = s2
+                ep_reward += r
+                ep_len += 1
+
+            self.metrics.record_episode(ep_reward, ep_len, success=terminated)
+            self.bucket_tracker.record_episode(
+                success=terminated, reward=ep_reward, length=ep_len, difficulty=difficulty,
+            )
+            self.callbacks.fire_episode(ep=ep, reward=ep_reward, length=ep_len, success=terminated)
+
+            if (ep + 1) % self.sched_cfg.update_interval == 0:
+                new_diff = self.scheduler.update(winrate=self.metrics.winrate())
+                self.callbacks.fire_difficulty_updated(difficulty=new_diff, episode_id=ep)
+
+            if ep % self.train_cfg.log_every_episodes == 0:
+                self.callbacks.fire_log(
+                    "info",
+                    f"ep {ep:>4}  R={ep_reward:+.2f}  L={ep_len:>3}  "
+                    f"eps={self.agent.epsilon:.3f}  winrate={self.metrics.winrate():.2%}  "
+                    f"diff={self.scheduler.current:.2f}"
                 )
