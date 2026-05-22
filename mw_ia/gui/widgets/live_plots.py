@@ -39,7 +39,7 @@ class _Plot(pg.PlotWidget):
 
 
 class LivePlots(QWidget):
-    """Widget composite : Reward, Loss, Epsilon, Winrate."""
+    """Widget composite : Reward, Loss, Epsilon, Winrate, Difficulty (procedural)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -49,11 +49,13 @@ class LivePlots(QWidget):
         self.loss = _Plot("Loss DQN", THEME.danger)
         self.epsilon = _Plot("Epsilon", THEME.warning, ymin=0.0, ymax=1.05)
         self.winrate = _Plot("Winrate (fenêtre)", THEME.accent, ymin=0.0, ymax=1.05)
+        self.difficulty = _Plot("Difficulté (procedural)", THEME.accent2, ymin=0.0, ymax=1.05)
         layout.addWidget(self.reward, 0, 0)
         layout.addWidget(self.loss, 0, 1)
-        layout.addWidget(self.epsilon, 1, 0)
-        layout.addWidget(self.winrate, 1, 1)
+        layout.addWidget(self.epsilon, 0, 2)
+        layout.addWidget(self.winrate, 1, 0)
+        layout.addWidget(self.difficulty, 1, 1)
 
     def reset(self) -> None:
-        for p in (self.reward, self.loss, self.epsilon, self.winrate):
+        for p in (self.reward, self.loss, self.epsilon, self.winrate, self.difficulty):
             p.clear_data()
