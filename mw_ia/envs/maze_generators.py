@@ -72,7 +72,7 @@ class RandomObstaclesGenerator:
     cols: int
     start: tuple[int, int]
     goal: tuple[int, int]
-    min_density: float = 0.10
+    min_density: float = 0.0
     max_density: float = 0.50
     max_attempts: int = 100
 

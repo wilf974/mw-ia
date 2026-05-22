@@ -86,7 +86,7 @@ class ProceduralEnvConfig:
     mode: Literal["obstacles", "maze"]
     max_rows: int = 10
     max_cols: int = 10
-    min_density: float = 0.10           # mode obstacles uniquement
+    min_density: float = 0.0            # mode obstacles uniquement (démarrage curriculum sans obstacles)
     max_density: float = 0.50
     min_size: int = 4                   # mode maze uniquement
     max_size: int = 20
