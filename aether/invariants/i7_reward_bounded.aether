@@ -1,0 +1,20 @@
+; I7 — reward_bounded
+;
+; Le clamp d'une reward dans [r_min, r_max] preserve les bornes :
+;   clamp_reward(r) = max(r_min, min(r_max, r))  ∈  [r_min, r_max]
+;
+; Cohere les bornes annoncees (r_min <= r_max) avec la valeur effective.
+;
+; Implementation Python : mw_ia/guardrails/invariants.py::reward_bounded
+; (deterministe, applicable seulement quand reward_min/max != None).
+
+(@intent "Predicat I7 : reward_bounded — clamp_reward(r) ∈ [r_min, r_max]")
+(@invariant (and (>= result r_min) (<= result r_max)))
+(@example -1.0 1.0 0.5 0.5)
+(@example -1.0 1.0 1.5 1.0)
+(@example -1.0 1.0 -2.0 -1.0)
+(@example -1.0 1.0 -1.0 -1.0)
+(@example -1.0 1.0 1.0 1.0)
+(@example 0.0 100.0 -5.0 0.0)
+(@example 0.0 100.0 200.0 100.0)
+(fn clamp_reward ((r_min num) (r_max num) (r num)) num (max r_min (min r_max r)))
