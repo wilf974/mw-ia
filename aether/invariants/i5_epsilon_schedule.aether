@@ -1,0 +1,29 @@
+; I5 — epsilon_schedule
+;
+; Schedule lineaire de epsilon avec clamp final :
+;   eps(t) = eps_start + ((eps_end - eps_start) / decay) * t   si t < decay
+;          = eps_end                                            sinon
+;
+; Pour eps_start ∈ [0,1] et eps_end ∈ [0, eps_start], la sortie reste dans [0,1].
+; (Identique a la formule utilisee par DQNAgent en V1.)
+;
+; Implementation Python : mw_ia/guardrails/invariants.py::epsilon_schedule_decreasing
+; (100 points sur 2*decay_steps, verifie ∈ [0,1] et monotonie).
+;
+; Note : exemples choisis pour produire des floats exacts en IEEE 754
+; (eviter le 0.5250000000000001 du mid-decay generique).
+
+(@intent "Predicat I5 : epsilon_schedule — eps(t) ∈ [0,1] pour le schedule lineaire clampe")
+(@invariant (and (>= result 0.0) (<= result 1.0)))
+(@example 1.0 0.05 50000 0 1.0)
+(@example 1.0 0.05 50000 50000 0.05)
+(@example 1.0 0.05 50000 99999 0.05)
+(@example 1.0 0.05 50000 100000 0.05)
+(@example 1.0 0.5 4 2 0.75)
+(@example 1.0 0.5 4 0 1.0)
+(@example 1.0 0.5 4 4 0.5)
+(@example 0.5 0.25 8 4 0.375)
+(fn epsilon ((eps_start num) (eps_end num) (decay num) (t num)) num
+  (if (>= t decay)
+      eps_end
+      (+ eps_start (* (/ (- eps_end eps_start) decay) t))))
