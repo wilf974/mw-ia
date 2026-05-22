@@ -14,15 +14,18 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from mw_ia.config import Config
+from mw_ia.config import Config, ProceduralEnvConfig, SchedulerConfig
 from mw_ia.envs.gridworld import GridWorld
+from mw_ia.envs.maze_generators import RandomObstaclesGenerator
+from mw_ia.envs.procedural_env import ProceduralGridWorld
 from mw_ia.gui.theme import QSS, THEME
 from mw_ia.gui.widgets.control_panel import ControlPanel
+from mw_ia.gui.widgets.difficulty_label import DifficultyLabel
 from mw_ia.gui.widgets.gridworld_view import GridWorldView
 from mw_ia.gui.widgets.live_plots import LivePlots
 from mw_ia.gui.widgets.log_console import LogConsole
 from mw_ia.gui.widgets.stats_panel import StatsPanel
-from mw_ia.training.runner import DQNRunner, RunnerCallbacks
+from mw_ia.training.runner import DQNRunner, ProceduralDQNRunner, RunnerCallbacks
 
 
 class TrainingThread(QThread):
@@ -101,9 +104,17 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout()
         self.gridview = GridWorldView(self.env)
         self.stats = StatsPanel()
+        self.difficulty_label = DifficultyLabel()
         self.plots = LivePlots()
         top.addWidget(self.gridview, 0)
-        top.addWidget(self.stats, 0)
+        # Stats + label difficulty empilés verticalement
+        stats_col = QVBoxLayout()
+        stats_col.addWidget(self.stats)
+        stats_col.addWidget(self.difficulty_label)
+        stats_col.addStretch(1)
+        stats_widget = QWidget()
+        stats_widget.setLayout(stats_col)
+        top.addWidget(stats_widget, 0)
         top.addWidget(self.plots, 1)
         root.addLayout(top, 3)
 
@@ -113,6 +124,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.log, 1)
 
         self.controls.start_clicked.connect(self.on_start)
+        self.controls.start_procedural_clicked.connect(self.on_start_procedural)
         self.controls.pause_clicked.connect(self.on_pause)
         self.controls.reset_clicked.connect(self.on_reset)
         self.controls.save_clicked.connect(self.on_save)
@@ -138,6 +150,38 @@ class MainWindow(QMainWindow):
         self.thread.log_signal.connect(self.log.append)
         self.thread.finished_signal.connect(self._on_finished)
         self.thread.maze_changed_signal.connect(self.gridview.on_maze_changed)
+        self.thread.difficulty_signal.connect(self._on_difficulty)
+        self.controls.set_running(True)
+        self.thread.start()
+
+    @pyqtSlot()
+    def on_start_procedural(self) -> None:
+        if self.thread is not None and self.thread.isRunning():
+            return
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        proc_cfg = ProceduralEnvConfig(mode="obstacles")
+        gen = RandomObstaclesGenerator(
+            rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
+            start=(0, 0), goal=(proc_cfg.max_rows - 1, proc_cfg.max_cols - 1),
+            min_density=proc_cfg.min_density, max_density=proc_cfg.max_density,
+        )
+        proc_env = ProceduralGridWorld(cfg=proc_cfg, generator=gen)
+        runner = ProceduralDQNRunner(
+            env=proc_env, proc_cfg=proc_cfg, dqn_cfg=self.config.dqn,
+            sched_cfg=SchedulerConfig(), train_cfg=self.config.training,
+            callbacks=RunnerCallbacks(), device=device,
+            seed=self.config.training.seed,
+        )
+        self.thread = TrainingThread(runner)
+        self.thread.step_signal.connect(self._on_step)
+        self.thread.episode_signal.connect(self._on_episode)
+        self.thread.loss_signal.connect(self._on_loss)
+        self.thread.epsilon_signal.connect(self._on_epsilon)
+        self.thread.log_signal.connect(self.log.append)
+        self.thread.finished_signal.connect(self._on_finished)
+        # Wiring procedural-spécifique
+        self.thread.maze_changed_signal.connect(self.gridview.on_maze_changed)
+        self.thread.maze_changed_signal.connect(self.difficulty_label.on_maze_changed)
         self.thread.difficulty_signal.connect(self._on_difficulty)
         self.controls.set_running(True)
         self.thread.start()
