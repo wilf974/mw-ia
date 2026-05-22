@@ -51,3 +51,49 @@ def test_reset_hidden_clears_state():
     assert agent._hidden_state is not None
     agent.reset_hidden()
     assert agent._hidden_state is None
+
+
+def test_begin_episode_clears_trajectory():
+    agent = _agent()
+    agent._episode_trajectory = [("fake", 0, 0.0, "fake", False)]
+    agent.begin_episode()
+    assert agent._episode_trajectory == []
+
+
+def test_observe_appends_to_trajectory():
+    agent = _agent()
+    agent.begin_episode()
+    obs = np.zeros(10, dtype=np.float32)
+    next_obs = np.ones(10, dtype=np.float32)
+    metrics = agent.observe(obs, action=1, reward=0.5, next_state=next_obs, done=False)
+    assert len(agent._episode_trajectory) == 1
+    assert agent.global_step == 1
+    assert "epsilon" in metrics
+
+
+def test_end_episode_pushes_trajectory_to_buffer():
+    agent = _agent()
+    agent.begin_episode()
+    obs = np.zeros(10, dtype=np.float32)
+    for _ in range(8):
+        agent.observe(obs, action=0, reward=0.0, next_state=obs, done=False)
+    agent.observe(obs, action=0, reward=1.0, next_state=obs, done=True)
+    metrics = agent.end_episode()
+    assert len(agent.buffer) == 1
+    # min_episodes_to_learn=5 mais on n'a que 1 épisode → pas de train step
+    assert "loss" not in metrics
+
+
+def test_end_episode_triggers_train_after_min_episodes():
+    """Pousser min_episodes_to_learn=5 épisodes → end_episode() doit déclencher train_step."""
+    agent = _agent()
+    obs = np.zeros(10, dtype=np.float32)
+    for ep in range(6):
+        agent.begin_episode()
+        for _ in range(8):
+            agent.observe(obs, action=0, reward=0.0, next_state=obs, done=False)
+        agent.observe(obs, action=0, reward=1.0, next_state=obs, done=True)
+        metrics = agent.end_episode()
+    # Au 6e épisode (>= min_episodes_to_learn=5), train step déclenché
+    assert "loss" in metrics
+    assert agent.last_loss is not None

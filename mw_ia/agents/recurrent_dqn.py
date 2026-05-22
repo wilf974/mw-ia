@@ -88,6 +88,45 @@ class RecurrentDQNAgent(Agent):
             return int(self._rng.integers(0, self.n_actions))
         return int(q.argmax(dim=-1).item())
 
+    def observe(
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+    ) -> dict[str, float]:
+        """Accumule la transition dans la trajectoire courante.
+
+        Train step PAS déclenché ici (cf. end_episode()).
+        """
+        self._episode_trajectory.append((state, action, reward, next_state, done))
+        self.global_step += 1
+        return {"epsilon": self.epsilon}
+
+    def end_episode(self) -> dict[str, float]:
+        """Push la trajectoire dans le buffer + train_steps_per_episode batches.
+
+        Doit être appelé par le runner après la boucle step de l'épisode.
+        """
+        if self._episode_trajectory:
+            self.buffer.push_trajectory(self._episode_trajectory)
+        metrics: dict[str, float] = {"epsilon": self.epsilon}
+        if len(self.buffer) >= self.cfg.min_episodes_to_learn:
+            losses: list[float] = []
+            for _ in range(self.cfg.train_steps_per_episode):
+                batch = self.buffer.sample(
+                    batch_size=self.cfg.batch_size, seq_len=self.cfg.sequence_length,
+                )
+                losses.append(self.trainer.step(batch))
+            if losses:
+                self.last_loss = sum(losses) / len(losses)
+                metrics["loss"] = self.last_loss
+        if self.global_step // self.cfg.target_sync_steps > self.target_syncs:
+            self.trainer.sync_target()
+            self.target_syncs += 1
+        return metrics
+
     def learn(self, transition: Any) -> dict[str, float]:
         raise NotImplementedError("Utiliser observe() + end_episode() pour DRQN")
 
