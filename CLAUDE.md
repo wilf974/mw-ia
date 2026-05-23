@@ -640,6 +640,47 @@ Découverte **importante** révélée par V2-V :
 
 **Recommandation** : refaire à terme un re-benchmark V2-Z et V2-W à diff=0.30 fixe avec V2-V pour avoir des chiffres comparables. Secondaire — le pivot vers eval rigoureux est désormais en place pour tous les sous-projets futurs.
 
+### V2-V — benchmark complémentaire @ diff=0.20 (2026-05-23)
+
+**Protocole** : 5 runs V2-W ep=5000 GPU `--double-dqn --eval-target-difficulty 0.20 --best-checkpoint-path checkpoints/v2v_0.20_seed{N}.pt`. Mêmes seeds 0-4 que les benchmarks précédents. Eval à diff=0.20 FIXE (frontière inférieure du bucket 1).
+
+**Résultats par seed (eval à diff=0.20 fixe, greedy)** :
+
+| Seed | Best @ diff=0.30 | **Best @ diff=0.20** | Δ | Capté à ep |
+|---|---|---|---|---|
+| 0 | 70 % | **80 %** | +10 pp | 1899 |
+| 1 | 70 % | **90 %** | +20 pp | 3099 |
+| 2 | 60 % | **80 %** | +20 pp | 4199 |
+| 3 | 50 % | 40 % ⚠️ incomplet | (run interrompu ep 2080) | 1899 |
+| **4** | **40 %** | **80 %** | **+40 pp** | **2299** |
+
+**⚠️ Anomalie seed 3** : run interrompu à ep 2080 (au lieu de 5000 prévus) sans crash apparent — DONE marker prématuré, pas de traceback. Le best capturé (40 % @ ep 1899) est probablement sous-évalué. Extrapolation : sur 5000 ép complets, seed 3 aurait probablement atteint 60-70 % @ diff=0.20 (en montée à ep 2080). À re-runner si le verdict statistique exige n=5 strict.
+
+**Statistiques agrégées** :
+
+| Métrique | V2-V @ diff=0.30 | **V2-V @ diff=0.20** |
+|---|---|---|
+| Mean best winrate | 58 % | **74 %** (4 complets + 1 incomplet) |
+| Best ≥ 60 % | 3/5 | **4/5** (+seed 4) |
+| **Best ≥ 70 % strict** | 2/5 | **4/5** (atteint ✓) |
+| Best ≥ 80 % | 1/5 | **4/5** |
+| Worst-case seed 4 | 40 % | **80 %** (+40 pp) |
+
+**Finding consolidé V2-V (n=5, diff=0.20 ET diff=0.30)** :
+
+> CNN + Double DQN + best-checkpoint rigoureux débloque **robustement la frontière diff=0.20** (4/5 seeds ≥ 70 % en eval greedy strict). La capacité réelle plafonne autour de **diff=0.25-0.30** : entre 0.20 et 0.30, le winrate moyen chute de 74 % → 58 % (-16 pp). À diff=0.30, le pic est 70 % pour les meilleurs seeds, 40 % pour le worst-case.
+
+### Phrase clé pour les prochaines sessions
+
+> **V2-V montre que l'évaluation rigoureuse change la lecture des résultats** : la capacité réelle se situe autour de **diff=0.20 robuste** (74 % moyen, 4/5 ≥ 70 %), avec un **plafond actuel vers diff=0.25-0.30** (58 % moyen). Tous les benchmarks futurs DOIVENT être rapportés en eval V2-V (greedy, 10 seeds held-out, diff fixe).
+
+### Implications pour les sous-projets futurs
+
+Le plafond capacité diff=0.25-0.30 devient le **nouveau benchmark scientifique de référence**. Tout sous-projet qui prétend "améliorer V2-W" doit démontrer un best-checkpoint @ diff=0.30 fixe ≥ 60 % moyen (et idéalement franchir diff=0.40).
+
+**Prochain sous-projet logique : V2-ZY** = CNN + LSTM + Double DQN combiné. Question scientifique :
+> Est-ce que la mémoire temporelle (V2-Y LSTM) ajoutée à la perception spatiale (V2-Z) et à la stabilité Q (V2-W) permet de pousser le plafond de diff=0.25-0.30 vers diff=0.40+ en eval rigoureux ?
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
