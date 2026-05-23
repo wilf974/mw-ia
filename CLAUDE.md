@@ -580,7 +580,65 @@ Le mean-improvement V2-Z → V2-W reste solide. La "magie" de Double DQN est ré
 3. **`tmp_path` fixture pytest sur Windows : chemins avec espaces** : utiliser `pathlib.Path` partout. PyTorch accepte `Path`.
 4. **Best-checkpoint écrasé entre runs** si même `--best-checkpoint-path` : suggérer `checkpoints/v2v_best_seed{N}.pt` pour éviter collision.
 5. **`eval_seeds=10000-10009` peut chevaucher training si `--episodes >> 10000`** : edge case, hors-scope MVP.
-6. **Eval à la diff scheduler.current uniquement** : MVP. Future extension multi-diff.
+6. **Eval à la diff scheduler.current uniquement** : ~~MVP. Future extension multi-diff.~~ **CORRIGÉ post-livraison** (commit `98c2c64`) — bug critique découvert au re-benchmark (cf. section "V2-V — validation n=5" plus bas). Eval désormais à `eval_target_difficulty` FIXE (default 0.30), pas `scheduler.current`. Sans diff fixe, le best capture l'agent trivial à diff=0 (winrate ~100 % sur mazes vides) et n'est jamais battu par l'agent compétent à diff supérieure.
+
+### V2-V — validation empirique n=5 same-seed (2026-05-23)
+
+**Protocole** : 5 runs V2-W ep=5000 GPU `--double-dqn --eval-target-difficulty 0.30 --best-checkpoint-path checkpoints/v2v_fix_w_best_seed{N}.pt`. Mêmes seeds que les benchmarks précédents V2-Z/W (0-4). Eval à diff=0.30 FIXE (10 seeds eval 10000-10009).
+
+**Note méthodologique** : un premier run n=5 (commit `97d20b7` initial V2-V MVP) a révélé un bug — le critère "best > previous_best" comparait des winrates à difficultés DIFFÉRENTES (eval à `scheduler.current` croissant). Best restait figé sur l'agent trivial @ diff=0.00 (winrate 100 % sur mazes vides) et n'était jamais battu. Fix commit `98c2c64` : eval à `eval_target_difficulty` fixe. Cette section utilise les résultats POST-fix.
+
+**Résultats par seed (eval à diff=0.30 fixe, greedy, 10 seeds held-out)** :
+
+| Seed | V2-W final (training cumul) | **V2-V best @ diff=0.30 (greedy eval rigoureux)** | Δ winrate | Capté à ep |
+|---|---|---|---|---|
+| 0 | 62 % @ diff=0.40 | **70 %** | +8 pp | 3699 |
+| 1 | 68 % @ diff=0.35 | **70 %** | +2 pp | 3599 |
+| 2 | 81 % @ diff=0.40 | 60 % | −21 pp | 4399 |
+| 3 | 49 % @ diff=0.15 | 50 % | +1 pp | 2899 |
+| **4** | **1 % @ diff=0.10** (collapse) | **40 %** | **+39 pp** | **3599** |
+
+**Statistiques agrégées n=5** :
+
+| Métrique | Valeur |
+|---|---|
+| Mean best winrate @ diff=0.30 | **58 %** |
+| Std | ~12 pp |
+| Min (worst seed) | 40 % (seed 4) |
+| Max | 70 % (seeds 0, 1) |
+| Best ≥ 60 % | **3/5 seeds** (0, 1, 2) |
+| Best ≥ 70 % strict | **2/5 seeds** (0, 1) |
+| Seeds sauvés du collapse | 2/5 (seeds 3, 4 où best > final) |
+
+**Cible originale "seed 4 best ≥ 60 %"** : **NON atteinte** (40 %). MAIS +39 pp d'amélioration sur le worst-case = sauvetage majeur.
+
+**Verdict V2-V** :
+
+- ✅ **Mécaniquement validé** : best-checkpoint capture le pic agent (pas l'agent trivial après fix)
+- ✅ **Causalement validé** : seed 4 +39 pp (1 % → 40 %) prouve que V2-V récupère ce que le training détruit
+- ⚠️ **Cible spéculative 60 % non atteinte sur worst-case** : 40 % réel
+- ✅ **Story scientifique cohérente** : V2-V sauve la moyenne (58 %) et le worst-case
+
+### Meta-finding : training winrate ≠ capacité réelle (2026-05-23)
+
+Découverte **importante** révélée par V2-V :
+
+> Le "80 % @ diff=0.30 ep 3460" qu'on célébrait sur V2-W seed 4 dans les sessions précédentes était la **training rolling winrate cumul derniers 100 ép**. En held-out eval rigoureux (10 mazes nouveaux à diff=0.30 fixe, greedy strict), le même agent fait seulement 40 %. **La vraie capacité greedy est ~50 % plus basse que les métriques training**.
+
+**Implications méthodologiques** :
+
+1. **Tous les benchmarks précédents (V2-Z n=3/n=5, V2-W n=3/n=5, ep=3000 hypothèse H1) sont mesurés en training winrate** — donc surestimés.
+2. Les findings qualitatifs restent valides (V2-Z bat V2-X, V2-W bat V2-Z en moyenne, H1 late-stage collapse réel) mais les pourcentages cités sont inflationnés vs eval rigoureux.
+3. **À partir de maintenant**, tous les nouveaux benchmarks DOIVENT être rapportés via V2-V eval (best @ diff fixe greedy) pour être comparables et fiables.
+4. Le critère succès originel V2-X "bucket 1 ≥ 70 %" était sur training winrate — il faut le re-définir en eval greedy. Probable nouveau seuil : 50-60 % en eval greedy pour démontrer une capacité robuste.
+
+**Source du gap training/eval** :
+- Training cumul : 100 derniers épisodes au TRAINING SCHEDULER (diff variable, agent vu plein de mazes proches récemment)
+- Eval rigoureux : 10 mazes HELD-OUT à diff FIXE, greedy strict (pas d'eps), pas de buffer pollution
+- Le training inclut implicitement de l'eps-greedy + des mazes plus faciles (scheduler descend si winrate bas)
+- L'eval est strictement plus dur méthodologiquement
+
+**Recommandation** : refaire à terme un re-benchmark V2-Z et V2-W à diff=0.30 fixe avec V2-V pour avoir des chiffres comparables. Secondaire — le pivot vers eval rigoureux est désormais en place pour tous les sous-projets futurs.
 
 ---
 
