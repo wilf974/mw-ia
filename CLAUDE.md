@@ -37,6 +37,7 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 | **Z** | CNN perception spatiale (roadmap #2) | ✅ Livré (tag `v0.2.0-z`) |
 | **W** | Double DQN sur ConvDQN (roadmap #7) | ✅ Livré (tag `v0.2.0-w`) |
 | **V** | Training Protocol Stabilization (eval + best-checkpoint) | ✅ Livré (tag `v0.2.0-v`) |
+| **ZY** | CNN + LSTM + Double DQN combiné | ✅ Livré (tag `v0.2.0-zy`) |
 | **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
@@ -681,6 +682,48 @@ Le plafond capacité diff=0.25-0.30 devient le **nouveau benchmark scientifique 
 **Prochain sous-projet logique : V2-ZY** = CNN + LSTM + Double DQN combiné. Question scientifique :
 > Est-ce que la mémoire temporelle (V2-Y LSTM) ajoutée à la perception spatiale (V2-Z) et à la stabilité Q (V2-W) permet de pousser le plafond de diff=0.25-0.30 vers diff=0.40+ en eval rigoureux ?
 
+### V2-ZY — état final des phases (livraison 2026-05-23)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Setup scaffold | T1 | ✅ | 0 | 1 |
+| 2 — `ConvRecurrentQNetwork` | T2 | ✅ | 5 | 1 |
+| 3 — `RecurrentDQNTrainer` extension `double_dqn` | T3 | ✅ | 1 | 1 |
+| 4 — `ConvRecurrentDQNConfig` | T4 | ✅ | 5 | 1 |
+| 5 — `ConvRecurrentDQNAgent` | T5 | ✅ | 7 | 1 |
+| 6 — V2-V `PeriodicEvaluator` extension `begin_episode` duck-typing | T6 | ✅ | 1 | 1 |
+| 7 — `ConvRecurrentProceduralDQNRunner` | T7 | ✅ | 2 | 1 |
+| 8 — CLI + CI smoke | T8-T9 | ✅ | 0 | 2 |
+| 9 — README + CLAUDE.md + tag `v0.2.0-zy` | T10 | ✅ | 0 | 1 + tag |
+
+### Composants V2-ZY livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `ConvRecurrentQNetwork` | `mw_ia/neural/conv_recurrent.py` | `Conv → Flatten → LSTM → FC`. Accepte obs flat 1D (compat SequenceReplayBuffer V2-Y), reshape interne 3D pour Conv. ~3.3 M params. |
+| `ConvRecurrentDQNAgent` | `mw_ia/agents/conv_recurrent_dqn.py` | Combo CNN + LSTM + Double DQN. Pattern V2-Y : hidden state runtime, reset_hidden/begin_episode par épisode, train à end_episode. |
+| `ConvRecurrentDQNConfig` | `mw_ia/config.py` | Combo défauts V2-Z + V2-Y + V2-W + V2-V activés. |
+| `RecurrentDQNTrainer` extension | `mw_ia/neural/recurrent_trainer.py` | + kwarg `double_dqn: bool = False` (default préserve V2-Y baseline). Branche conditionnelle dans step(). |
+| `PeriodicEvaluator` extension | `mw_ia/training/evaluator.py` | Duck-typing : appelle `agent.begin_episode()` au début de chaque rollout eval si la méthode existe. |
+| `ConvRecurrentProceduralDQNRunner` | `mw_ia/training/runner.py` | Runner V2-ZY intégré avec V2-V eval+best-checkpoint dès l'origine. |
+| CLI | `scripts/train_cnn_lstm_dqn_procedural.py` | Flags combinés V2-Z + V2-Y + V2-W + V2-V. |
+
+### Décisions techniques V2-ZY
+
+- **Architecture `Conv → Flatten → LSTM → FC`** (Hausknecht-style) : conv extrait features par frame, LSTM intègre temporellement, FC produit Q-values.
+- **Réutilisation `SequenceReplayBuffer` V2-Y** : obs flatten 1D pour storage, network reshape interne 1D → 3D pour conv. Zéro duplication.
+- **Réutilisation `RecurrentDQNTrainer` V2-Y** : étendu avec flag `double_dqn`. Default `False` préserve V2-Y baseline livré.
+- **Hidden state forward maintenu même en eps-random** : pattern V2-Y. La mémoire LSTM doit suivre la trajectoire indépendamment des choix d'action.
+- **V2-V `begin_episode` duck-typing** : `getattr(agent, 'begin_episode', None)` permet à V2-V de fonctionner avec V2-Z (no-op) ET V2-ZY (reset hidden).
+
+### V2-ZY — pièges connus
+
+1. **`SequenceReplayBuffer` stocke obs en flat** : agent flatten 3D→1D avant push, network reshape interne au forward.
+2. **LSTM forward avec `hidden=None` au début de chaque séquence training** : DRQN simple (V2-Y), pas de burn-in R2D2 (hors-scope MVP).
+3. **V2-Y trainer modification** : `double_dqn=False` par défaut préserve les 35 tests V2-Y existants.
+4. **V2-V duck-typing** : ConvDQNAgent V2-Z n'a pas `begin_episode`, donc no-op pour V2-Z. ConvRecurrentDQNAgent V2-ZY a `begin_episode`, hidden reset entre seeds eval.
+5. **Replay buffer 2.4 GB** : trajectoires complètes V2-Y pattern. Si OOM, descendre `replay_capacity`.
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
@@ -985,28 +1028,28 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 
 **Story scientifique consolidée n=5** : représentation spatiale (V2-Z) + Double DQN (V2-W) doublent le mean diff mais ne résolvent PAS le **bottleneck #3 = stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique**. Le finding pratique : **le meilleur agent V2-W existe avant ep 3500, l'entraînement après le détruit sur certains seeds**.
 
-**Prochaines étapes prioritaires (post V2-V livré 2026-05-23)** :
+**Prochaines étapes prioritaires (post V2-ZY livré 2026-05-23)** :
 
-1. ✅ **V2-V Training Protocol Stabilization** — **LIVRÉ** (tag `v0.2.0-v`) : eval périodique greedy + best-checkpoint tracking.
+1. ✅ **V2-ZY CNN + LSTM + Double DQN combiné** — **LIVRÉ** (tag `v0.2.0-zy`) : combo des 3 leviers + V2-V eval.
 
-2. **Re-benchmark V2-W n=5 ep=5000 AVEC V2-V activé** — validation scientifique non-bloquante :
-   - Lancer 5 runs V2-W ep=5000 avec `--best-checkpoint-path checkpoints/v2v_w_best_seed{N}.pt`
-   - Comparer winrate final vs best-checkpoint winrate par seed
-   - Cible : seed 4 best-checkpoint ≥ 60 % (vs final 1 %) → V2-V valide son utilité
+2. **Benchmark V2-ZY n=5 ep=5000 same-seed** — validation scientifique non-bloquante :
+   - Lancer 5 runs V2-ZY ep=5000 avec `--eval-target-difficulty 0.30 --best-checkpoint-path checkpoints/v2zy_best_seed{N}.pt`
+   - Comparer best @ diff=0.30 vs V2-W n=5 (mean 58 %, 2/5 ≥ 70 %)
+   - **Critère succès** : 4/5 seeds avec best ≥ 70 % @ diff=0.30
+   - Si critère atteint → benchmark bonus @ diff=0.40
 
-3. **Sous-projets V3+ déblocables maintenant** :
-   - **V2-ZY CNN+LSTM+Double DQN** : viable car best-checkpoint protège du collapse
-   - **Soft target Polyak τ=0.005** : tests propres car best-checkpoint isole l'effet vrai du timing
-   - **Mazes larges (max_size=15/20)** : eval permet de tracker généralisation
-   - **V2-V étendu** : early stopping + rollback + MA metrics + brancher sur V2-X/V2-Y runners
-   - **Sous-projet B (mémoire persistante cross-session)** : best-checkpoint est la fondation
+3. **Sous-projets V3+ déblocables** :
+   - **Soft target Polyak τ=0.005** : élimine le résidu de collapse tardif
+   - **R2D2 burn-in** : remplace DRQN simple par burn-in pour stabilité LSTM
+   - **Mazes larges (max_size=15/20)** : test translation equivariance CNN
+   - **Sous-projet B (mémoire persistante cross-session)**
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 230 passed. + `bash aether/verify_all.sh` → 8 OK.
+   Attendu : 252 passed. + `bash aether/verify_all.sh` → 8 OK.
 3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
@@ -1017,9 +1060,9 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 211 passed)
-- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`) sans raison documentée
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 252 passed)
+- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`, `mw_ia/neural/conv_recurrent.py`, `mw_ia/agents/conv_recurrent_dqn.py`) sans raison documentée
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)
 

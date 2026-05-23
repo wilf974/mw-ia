@@ -363,6 +363,31 @@ python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --de
 
 ~10 % de temps d'entraînement en plus (10 seeds eval × 200 max_steps / 100 ép training = ~100 ms / ép). Compensation : récupération du best-model qui aurait été détruit par le late-stage collapse.
 
+## V2-ZY — CNN + LSTM + Double DQN combiné (sous-projet livré)
+
+**Tag** : `v0.2.0-zy` — **Tests** : 252 verts (231 baseline + 21 V2-ZY)
+
+Combo des 3 leviers livrés : perception spatiale (V2-Z Conv2D), mémoire temporelle (V2-Y LSTM), stabilité Q-target (V2-W Double DQN). Validé via V2-V eval rigoureux.
+
+### Usage CLI
+
+```bash
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --best-checkpoint-path checkpoints/v2zy_best_seed0.pt
+```
+
+### Architecture
+
+- `mw_ia/neural/conv_recurrent.py::ConvRecurrentQNetwork` — `Conv → Flatten → LSTM → FC` (Hausknecht-style)
+- `mw_ia/agents/conv_recurrent_dqn.py::ConvRecurrentDQNAgent` — hidden state runtime maintenu, pattern V2-Y
+- `mw_ia/neural/recurrent_trainer.py::RecurrentDQNTrainer` (V2-Y) étendu avec flag `double_dqn`
+- `mw_ia/training/runner.py::ConvRecurrentProceduralDQNRunner` — intègre V2-V eval+best-checkpoint
+- `mw_ia/training/evaluator.py::PeriodicEvaluator` (V2-V) étendu avec duck-typing `agent.begin_episode()` pour reset hidden state entre rollouts eval
+
+### Critère succès cible
+
+4/5 seeds avec `best_checkpoint @ diff=0.30 ≥ 70 %` en eval rigoureux V2-V.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
