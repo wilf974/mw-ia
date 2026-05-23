@@ -321,3 +321,118 @@ class ConvDQNConfig:
             raise ValueError(
                 f"eval_target_difficulty doit être ∈ [0,1], reçu {self.eval_target_difficulty}"
             )
+
+
+@dataclass(frozen=True)
+class ConvRecurrentDQNConfig:
+    """V2-ZY : Conv2D + LSTM + Double DQN combiné, avec V2-V eval activé.
+
+    Combo des 3 leviers livrés V2-Z (perception spatiale), V2-Y (mémoire),
+    V2-W (Double DQN). Réseau ConvRecurrentQNetwork, buffer SequenceReplayBuffer
+    V2-Y, trainer RecurrentDQNTrainer V2-Y étendu avec flag double_dqn.
+
+    Champs combinés V2-Y DRQNConfig + V2-Z ConvDQNConfig + V2-W double_dqn + V2-V eval_*.
+    """
+
+    # Conv-spécifique (V2-Z pattern)
+    conv_channels: tuple[int, ...] = (32, 64)
+    kernel_size: int = 3
+    padding: int = 1
+
+    # LSTM (V2-Y pattern)
+    lstm_hidden: int = 128
+    sequence_length: int = 32
+
+    # Replay (TRAJECTOIRES, pas transitions — V2-Y pattern)
+    replay_capacity: int = 5_000
+    min_episodes_to_learn: int = 100
+    train_steps_per_episode: int = 4
+
+    # Optimisation
+    batch_size: int = 128
+    lr: float = 1e-3
+    gamma: float = 0.99
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.05
+    epsilon_decay_steps: int = 200_000
+    target_sync_steps: int = 1_000
+    use_amp: bool = True
+
+    # V2-W : Double DQN activé par défaut V2-ZY (combo des 3 leviers)
+    double_dqn: bool = True
+
+    # V2-V : Training Protocol Stabilization (activé par défaut V2-ZY)
+    eval_enabled: bool = True
+    eval_every_episodes: int = 100
+    eval_seeds: tuple[int, ...] = tuple(range(10_000, 10_010))
+    eval_max_steps: int = 200
+    eval_target_difficulty: float = 0.30
+    best_checkpoint_path: str | None = None
+
+    # Training
+    episodes: int = 5_000
+    max_steps_per_episode: int = 200
+
+    def __post_init__(self) -> None:
+        if len(self.conv_channels) == 0:
+            raise ValueError("conv_channels ne peut pas être vide")
+        if any(c <= 0 for c in self.conv_channels):
+            raise ValueError(
+                f"conv_channels doivent être > 0, reçu {self.conv_channels}"
+            )
+        if self.kernel_size <= 0:
+            raise ValueError(f"kernel_size doit être > 0, reçu {self.kernel_size}")
+        if self.padding < 0:
+            raise ValueError(f"padding doit être >= 0, reçu {self.padding}")
+        if self.lstm_hidden <= 0:
+            raise ValueError(f"lstm_hidden doit être > 0, reçu {self.lstm_hidden}")
+        if not (1 <= self.sequence_length <= self.max_steps_per_episode):
+            raise ValueError(
+                f"sequence_length {self.sequence_length} hors [1, {self.max_steps_per_episode}]"
+            )
+        if self.replay_capacity <= 0:
+            raise ValueError(f"replay_capacity doit être > 0, reçu {self.replay_capacity}")
+        if self.min_episodes_to_learn <= 0:
+            raise ValueError(
+                f"min_episodes_to_learn doit être > 0, reçu {self.min_episodes_to_learn}"
+            )
+        if self.train_steps_per_episode <= 0:
+            raise ValueError(
+                f"train_steps_per_episode doit être > 0, reçu {self.train_steps_per_episode}"
+            )
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size doit être > 0, reçu {self.batch_size}")
+        if self.lr <= 0:
+            raise ValueError(f"lr doit être > 0, reçu {self.lr}")
+        if not (0.0 < self.gamma < 1.0):
+            raise ValueError(f"gamma doit être ∈ (0,1), reçu {self.gamma}")
+        if not (0.0 <= self.epsilon_end <= self.epsilon_start <= 1.0):
+            raise ValueError(
+                f"epsilon invalide : start={self.epsilon_start}, end={self.epsilon_end}"
+            )
+        if self.epsilon_decay_steps <= 0:
+            raise ValueError(
+                f"epsilon_decay_steps doit être > 0, reçu {self.epsilon_decay_steps}"
+            )
+        if self.target_sync_steps <= 0:
+            raise ValueError(
+                f"target_sync_steps doit être > 0, reçu {self.target_sync_steps}"
+            )
+        if self.eval_every_episodes <= 0:
+            raise ValueError(
+                f"eval_every_episodes doit être > 0, reçu {self.eval_every_episodes}"
+            )
+        if len(self.eval_seeds) == 0:
+            raise ValueError("eval_seeds ne peut pas être vide")
+        if self.eval_max_steps <= 0:
+            raise ValueError(f"eval_max_steps doit être > 0, reçu {self.eval_max_steps}")
+        if not (0.0 <= self.eval_target_difficulty <= 1.0):
+            raise ValueError(
+                f"eval_target_difficulty doit être ∈ [0,1], reçu {self.eval_target_difficulty}"
+            )
+        if self.episodes <= 0:
+            raise ValueError(f"episodes doit être > 0, reçu {self.episodes}")
+        if self.max_steps_per_episode <= 0:
+            raise ValueError(
+                f"max_steps_per_episode doit être > 0, reçu {self.max_steps_per_episode}"
+            )
