@@ -1,0 +1,5 @@
+"""ConvRecurrentDQNAgent — agent V2-ZY combinant perception spatiale (Conv) + mémoire (LSTM) + Double DQN.
+
+Voir spec : docs/superpowers/specs/2026-05-23-mw-ia-cnn-lstm-double-dqn-design.md §2
+"""
+from __future__ import annotations
