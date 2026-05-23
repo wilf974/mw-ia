@@ -11,10 +11,11 @@ from typing import Callable
 import numpy as np
 
 from mw_ia.agents.conv_dqn import ConvDQNAgent
+from mw_ia.agents.conv_recurrent_dqn import ConvRecurrentDQNAgent
 from mw_ia.agents.dqn import DQNAgent
 from mw_ia.agents.q_learning import QLearningAgent, Transition
 from mw_ia.agents.recurrent_dqn import RecurrentDQNAgent
-from mw_ia.config import ConvDQNConfig, DQNConfig, DRQNConfig, ProceduralEnvConfig, QLearningConfig, SchedulerConfig, TrainingConfig
+from mw_ia.config import ConvDQNConfig, ConvRecurrentDQNConfig, DQNConfig, DRQNConfig, ProceduralEnvConfig, QLearningConfig, SchedulerConfig, TrainingConfig
 from mw_ia.envs.gridworld import GridWorld
 from mw_ia.envs.procedural_env import ProceduralGridWorld, encode_procedural_observation, encode_procedural_observation_2d
 from mw_ia.training.checkpoint_tracker import BestCheckpointTracker
@@ -576,6 +577,153 @@ class ConvProceduralDQNRunner(_BaseRunner):
                 )
 
             # V2-V : eval périodique + best-checkpoint
+            if (
+                self.evaluator is not None
+                and (ep + 1) % self.dqn_cfg.eval_every_episodes == 0
+            ):
+                eval_metrics = self.evaluator.evaluate(
+                    self.agent, self.dqn_cfg.eval_target_difficulty,
+                )
+                improved = self.best_tracker.update(eval_metrics, self.agent, episode=ep)
+                self.callbacks.fire_evaluation(
+                    ep=ep,
+                    eval_winrate=eval_metrics["winrate"],
+                    eval_diff=eval_metrics["difficulty"],
+                    best_winrate=self.best_tracker.best_winrate,
+                    best_episode=self.best_tracker.best_episode,
+                    improved=improved,
+                )
+                self.callbacks.fire_log(
+                    "info",
+                    f"eval ep {ep:>4} : winrate={eval_metrics['winrate']:.2%} "
+                    f"@ diff={eval_metrics['difficulty']:.2f}  "
+                    f"best={self.best_tracker.best_winrate:.2%} "
+                    f"@ ep {self.best_tracker.best_episode}"
+                    + ("  NEW BEST" if improved else "")
+                )
+
+
+class ConvRecurrentProceduralDQNRunner(_BaseRunner):
+    """V2-ZY runner : Conv + LSTM + Double DQN + V2-V eval+best-checkpoint."""
+
+    def __init__(
+        self,
+        *,
+        env: ProceduralGridWorld,
+        proc_cfg: ProceduralEnvConfig,
+        dqn_cfg: ConvRecurrentDQNConfig,
+        sched_cfg: SchedulerConfig,
+        train_cfg: TrainingConfig,
+        callbacks: RunnerCallbacks,
+        device: str = "cuda",
+        seed: int = 0,
+    ) -> None:
+        super().__init__(train_cfg, callbacks)
+        self.env = env
+        self.proc_cfg = proc_cfg
+        self.dqn_cfg = dqn_cfg
+        self.sched_cfg = sched_cfg
+        self.scheduler = AdaptiveDifficultyScheduler(sched_cfg)
+        self.bucket_tracker = DifficultyBucketTracker(train_cfg)
+        self.agent = ConvRecurrentDQNAgent(
+            in_channels=3, rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
+            n_actions=4, cfg=dqn_cfg, device=device, seed=seed,
+        )
+
+        if dqn_cfg.eval_enabled:
+            eval_gen = type(env.generator).__new__(type(env.generator))
+            eval_gen.__dict__.update(env.generator.__dict__)
+            eval_env = ProceduralGridWorld(cfg=proc_cfg, generator=eval_gen)
+            self.evaluator: PeriodicEvaluator | None = PeriodicEvaluator(
+                eval_env=eval_env,
+                eval_seeds=dqn_cfg.eval_seeds,
+                max_steps=dqn_cfg.eval_max_steps,
+                observation_encoder=encode_procedural_observation_2d,
+                proc_cfg=proc_cfg,
+            )
+            self.best_tracker: BestCheckpointTracker | None = BestCheckpointTracker(
+                path=dqn_cfg.best_checkpoint_path,
+            )
+        else:
+            self.evaluator = None
+            self.best_tracker = None
+
+    def run(self) -> None:
+        self.callbacks.fire_log(
+            "info",
+            f"V2-ZY Conv+LSTM+DoubleDQN ({self.proc_cfg.mode}) sur {self.agent.device}"
+        )
+        self.callbacks.fire_log(
+            "info",
+            f"Config: conv_channels={self.dqn_cfg.conv_channels} "
+            f"lstm_hidden={self.dqn_cfg.lstm_hidden} "
+            f"double_dqn={self.dqn_cfg.double_dqn} "
+            f"eval_enabled={self.dqn_cfg.eval_enabled} "
+            f"eval_target_difficulty={self.dqn_cfg.eval_target_difficulty}"
+        )
+        for ep in range(self.dqn_cfg.episodes):
+            if self._stop:
+                return
+
+            self.env.set_difficulty(self.scheduler.current)
+            state, info = self.env.reset(seed=ep)
+            maze = info["maze"]
+            difficulty = info["difficulty"]
+            goal = self.env.inner.cfg.goal
+            self.callbacks.fire_maze_changed(maze=maze, episode_id=ep, difficulty=difficulty)
+
+            self.agent.reset_hidden()
+            self.agent.begin_episode()
+
+            ep_reward = 0.0
+            ep_len = 0
+            terminated = truncated = False
+            while not (terminated or truncated) and ep_len < self.dqn_cfg.max_steps_per_episode:
+                if self._stop:
+                    return
+                while self._paused and not self._stop:
+                    pass
+                obs = encode_procedural_observation_2d(
+                    state=state, grid=maze, goal=goal,
+                    max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                )
+                a = self.agent.act(obs)
+                s2, r, terminated, truncated, _ = self.env.step(a)
+                next_obs = encode_procedural_observation_2d(
+                    state=s2, grid=maze, goal=goal,
+                    max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                )
+                self.agent.observe(obs, a, r, next_obs, terminated or truncated)
+                self.callbacks.fire_step(state=state, action=a, reward=r, next_state=s2)
+                state = s2
+                ep_reward += r
+                ep_len += 1
+
+            m = self.agent.end_episode()
+            if "loss" in m:
+                self.metrics.record_loss(m["loss"])
+                self.callbacks.fire_loss(self.agent.global_step, m["loss"])
+            self.callbacks.fire_epsilon(self.agent.global_step, m["epsilon"])
+            self.metrics.record_epsilon(m["epsilon"])
+
+            self.metrics.record_episode(ep_reward, ep_len, success=terminated)
+            self.bucket_tracker.record_episode(
+                success=terminated, reward=ep_reward, length=ep_len, difficulty=difficulty,
+            )
+            self.callbacks.fire_episode(ep=ep, reward=ep_reward, length=ep_len, success=terminated)
+
+            if (ep + 1) % self.sched_cfg.update_interval == 0:
+                new_diff = self.scheduler.update(winrate=self.metrics.winrate())
+                self.callbacks.fire_difficulty_updated(difficulty=new_diff, episode_id=ep)
+
+            if ep % self.train_cfg.log_every_episodes == 0:
+                self.callbacks.fire_log(
+                    "info",
+                    f"ep {ep:>4}  R={ep_reward:+.2f}  L={ep_len:>3}  "
+                    f"eps={self.agent.epsilon:.3f}  winrate={self.metrics.winrate():.2%}  "
+                    f"diff={self.scheduler.current:.2f}"
+                )
+
             if (
                 self.evaluator is not None
                 and (ep + 1) % self.dqn_cfg.eval_every_episodes == 0
