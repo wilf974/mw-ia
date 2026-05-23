@@ -580,7 +580,9 @@ class ConvProceduralDQNRunner(_BaseRunner):
                 self.evaluator is not None
                 and (ep + 1) % self.dqn_cfg.eval_every_episodes == 0
             ):
-                eval_metrics = self.evaluator.evaluate(self.agent, self.scheduler.current)
+                eval_metrics = self.evaluator.evaluate(
+                    self.agent, self.dqn_cfg.eval_target_difficulty,
+                )
                 improved = self.best_tracker.update(eval_metrics, self.agent, episode=ep)
                 self.callbacks.fire_evaluation(
                     ep=ep,

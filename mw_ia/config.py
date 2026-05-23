@@ -256,6 +256,10 @@ class ConvDQNConfig:
     eval_every_episodes: int = 100
     eval_seeds: tuple[int, ...] = tuple(range(10_000, 10_010))
     eval_max_steps: int = 200
+    # V2-V fix : eval à diff FIXE (pas scheduler.current). Sans ça, le best
+    # capture l'agent trivial à diff=0.00 (winrate 100% sur mazes vides) et
+    # n'est jamais battu par l'agent compétent à diff supérieure.
+    eval_target_difficulty: float = 0.30
     best_checkpoint_path: str | None = None
     episodes: int = 5_000
     max_steps_per_episode: int = 200
@@ -313,3 +317,7 @@ class ConvDQNConfig:
             raise ValueError("eval_seeds ne peut pas être vide")
         if self.eval_max_steps <= 0:
             raise ValueError(f"eval_max_steps doit être > 0, reçu {self.eval_max_steps}")
+        if not (0.0 <= self.eval_target_difficulty <= 1.0):
+            raise ValueError(
+                f"eval_target_difficulty doit être ∈ [0,1], reçu {self.eval_target_difficulty}"
+            )

@@ -59,6 +59,14 @@ def main() -> int:
         help="Périodicité (ép) de l'évaluation greedy (default V2-V : 100).",
     )
     parser.add_argument(
+        "--eval-target-difficulty",
+        type=float,
+        default=0.30,
+        help="Difficulty FIXE pour l'eval greedy (default 0.30). "
+             "Sans diff fixe, le best capture l'agent trivial à diff=0 (winrate ~100%) "
+             "et n'est jamais battu par l'agent compétent à diff supérieure.",
+    )
+    parser.add_argument(
         "--best-checkpoint-path",
         type=str,
         default=None,
@@ -88,6 +96,7 @@ def main() -> int:
         double_dqn=args.double_dqn,
         eval_enabled=args.eval,
         eval_every_episodes=args.eval_every_episodes,
+        eval_target_difficulty=args.eval_target_difficulty,
         best_checkpoint_path=args.best_checkpoint_path,
     )
     sched_cfg = SchedulerConfig(
