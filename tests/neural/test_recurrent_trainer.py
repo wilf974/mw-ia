@@ -75,3 +75,29 @@ def test_trainer_sync_target_copies_weights(cpu_device):
     # Après sync, online == target
     trainer.sync_target()
     assert torch.allclose(online.fc_in.weight, target.fc_in.weight)
+
+
+def test_double_dqn_branch_differs_from_standard(cpu_device: torch.device) -> None:
+    """V2-ZY/V2-W : avec online != target, les formules DQN et Double DQN divergent."""
+    from mw_ia.neural.recurrent import RecurrentQNetwork
+
+    online = RecurrentQNetwork(input_dim=300, n_actions=4, fc_hidden=64, lstm_hidden=32).to(cpu_device)
+    target = RecurrentQNetwork(input_dim=300, n_actions=4, fc_hidden=64, lstm_hidden=32).to(cpu_device)
+    target.load_state_dict(online.state_dict())
+    with torch.no_grad():
+        for p in online.parameters():
+            p.add_(0.5)
+
+    torch.manual_seed(42)
+    next_states = torch.randn(8, 4, 300, device=cpu_device)
+
+    with torch.no_grad():
+        q_target_all, _ = target(next_states, None)
+        q_next_dqn = q_target_all.max(dim=-1).values
+        q_online_all, _ = online(next_states, None)
+        next_actions = q_online_all.argmax(dim=-1)
+        q_next_double = q_target_all.gather(-1, next_actions.unsqueeze(-1)).squeeze(-1)
+
+    assert not torch.allclose(q_next_dqn, q_next_double), (
+        "Double DQN doit differer de DQN classique quand online != target"
+    )

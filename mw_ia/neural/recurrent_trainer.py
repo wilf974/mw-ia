@@ -7,11 +7,15 @@ chaque séquence de training (pas de burn-in en V2-Y MVP).
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 from torch import nn
 
-from mw_ia.neural.recurrent import RecurrentQNetwork
 from mw_ia.neural.sequence_buffer import BatchSeq
+
+if TYPE_CHECKING:
+    from mw_ia.neural.recurrent import RecurrentQNetwork
 
 
 class RecurrentDQNTrainer:
@@ -19,17 +23,19 @@ class RecurrentDQNTrainer:
 
     def __init__(
         self,
-        online: RecurrentQNetwork,
-        target: RecurrentQNetwork,
+        online: nn.Module,  # RecurrentQNetwork ou ConvRecurrentQNetwork
+        target: nn.Module,
         *,
         lr: float = 1e-3,
         gamma: float = 0.99,
         device: str = "cuda",
         use_amp: bool = True,
+        double_dqn: bool = False,
     ) -> None:
         self.online = online
         self.target = target
         self.gamma = gamma
+        self.double_dqn = double_dqn
         self.device = torch.device(device)
         self.use_amp = bool(use_amp and self.device.type == "cuda")
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=lr)
@@ -58,8 +64,17 @@ class RecurrentDQNTrainer:
             # q_pred shape : (seq, batch)
 
             with torch.no_grad():
-                q_next_all, _ = self.target(next_states, None)
-                q_next = q_next_all.max(dim=-1).values
+                if self.double_dqn:
+                    # V2-W branche appliquée au BPTT recurrent :
+                    # online sélectionne, target évalue (Hasselt 2015)
+                    q_online_next_all, _ = self.online(next_states, None)
+                    next_actions = q_online_next_all.argmax(dim=-1)
+                    q_target_all, _ = self.target(next_states, None)
+                    q_next = q_target_all.gather(-1, next_actions.unsqueeze(-1)).squeeze(-1)
+                else:
+                    # V2-Y baseline DQN classique
+                    q_next_all, _ = self.target(next_states, None)
+                    q_next = q_next_all.max(dim=-1).values
                 target_q = rewards + self.gamma * q_next * (1.0 - dones)
 
             # Huber loss element-wise, puis mask, puis moyenne sur vrais steps
