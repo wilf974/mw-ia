@@ -38,6 +38,11 @@ jobs:
           mkdir -p checkpoints
           python scripts/train_cnn_dqn_procedural.py --episodes 10 --mode obstacles --device cpu --eval-every-episodes 5 --best-checkpoint-path checkpoints/ci_v2v_best.pt
           test -f checkpoints/ci_v2v_best.pt
+      - name: Smoke test V2-ZY CNN + LSTM + Double DQN
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles --device cpu --eval-every-episodes 5 --best-checkpoint-path checkpoints/ci_v2zy_best.pt
+          test -f checkpoints/ci_v2zy_best.pt
 
   aether-files:
     runs-on: ubuntu-latest
