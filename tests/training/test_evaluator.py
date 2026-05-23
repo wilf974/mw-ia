@@ -116,3 +116,23 @@ def test_evaluate_respects_difficulty() -> None:
     agent = _build_agent()
     evaluator.evaluate(agent, difficulty=0.25)
     assert evaluator.eval_env._difficulty == 0.25
+
+
+def test_evaluator_calls_begin_episode_if_exists() -> None:
+    """V2-ZY duck-typing : si agent expose begin_episode(), evaluator l'appelle.
+
+    Pour les agents recurrent (LSTM hidden state), reset entre rollouts eval
+    est nécessaire pour empêcher la contamination du hidden state entre seeds eval.
+    """
+    evaluator = _build_evaluator(eval_seeds=(10_000, 10_001, 10_002))
+    agent = _build_agent()
+
+    call_count = [0]
+
+    def tracked_begin_episode() -> None:
+        call_count[0] += 1
+
+    agent.begin_episode = tracked_begin_episode
+
+    evaluator.evaluate(agent, difficulty=0.10)
+    assert call_count[0] == 3
