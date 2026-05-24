@@ -170,6 +170,7 @@ class DRQNConfig:
     epsilon_decay_steps: int = 200_000  # default V2-X gagnant
     target_sync_steps: int = 1_000
     use_amp: bool = True
+    polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak (Lillicrap 2015).
 
     # Training
     episodes: int = 5_000
@@ -217,6 +218,10 @@ class DRQNConfig:
         if self.max_steps_per_episode <= 0:
             raise ValueError(
                 f"max_steps_per_episode doit être > 0, reçu {self.max_steps_per_episode}"
+            )
+        if not (0.0 <= self.polyak_tau <= 1.0):
+            raise ValueError(
+                f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
             )
 
 
