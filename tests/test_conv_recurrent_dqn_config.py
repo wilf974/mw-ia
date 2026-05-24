@@ -51,6 +51,18 @@ def test_validation_eval_target_difficulty_bounds() -> None:
     assert cfg.eval_target_difficulty == 0.50
 
 
+def test_v2zy_polyak_tau_default_and_validation() -> None:
+    """V2-U : default polyak_tau=0.0, validation dans [0, 1]."""
+    cfg = ConvRecurrentDQNConfig()
+    assert cfg.polyak_tau == 0.0
+    cfg2 = ConvRecurrentDQNConfig(polyak_tau=0.005)
+    assert cfg2.polyak_tau == 0.005
+    with pytest.raises(ValueError):
+        ConvRecurrentDQNConfig(polyak_tau=-0.001)
+    with pytest.raises(ValueError):
+        ConvRecurrentDQNConfig(polyak_tau=1.001)
+
+
 def test_aether_compat() -> None:
     """VariantSpec dérivé du ConvRecurrentDQNConfig passe les invariants Aether I1-I8."""
     cfg = ConvRecurrentDQNConfig()

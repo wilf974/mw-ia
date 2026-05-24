@@ -370,6 +370,7 @@ class ConvRecurrentDQNConfig:
 
     # V2-W : Double DQN activé par défaut V2-ZY (combo des 3 leviers)
     double_dqn: bool = True
+    polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak.
 
     # V2-V : Training Protocol Stabilization (activé par défaut V2-ZY)
     eval_enabled: bool = True
@@ -445,4 +446,8 @@ class ConvRecurrentDQNConfig:
         if self.max_steps_per_episode <= 0:
             raise ValueError(
                 f"max_steps_per_episode doit être > 0, reçu {self.max_steps_per_episode}"
+            )
+        if not (0.0 <= self.polyak_tau <= 1.0):
+            raise ValueError(
+                f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
             )
