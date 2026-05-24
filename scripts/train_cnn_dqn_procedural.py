@@ -73,6 +73,13 @@ def main() -> int:
         help="Chemin .pt du best-checkpoint (default None = pas de sauvegarde disque). "
              "Suggestion : checkpoints/v2v_best_seed{N}.pt",
     )
+    parser.add_argument(
+        "--polyak-tau",
+        type=float,
+        default=0.0,
+        help="V2-U : soft Polyak target update tau. Default 0.0 = hard sync. "
+             "Recommande : 0.005 pour activer Polyak.",
+    )
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -98,6 +105,7 @@ def main() -> int:
         eval_every_episodes=args.eval_every_episodes,
         eval_target_difficulty=args.eval_target_difficulty,
         best_checkpoint_path=args.best_checkpoint_path,
+        polyak_tau=args.polyak_tau,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,

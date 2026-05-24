@@ -47,6 +47,13 @@ def main() -> int:
     parser.add_argument("--eval-every-episodes", type=int, default=100)
     parser.add_argument("--eval-target-difficulty", type=float, default=0.30)
     parser.add_argument("--best-checkpoint-path", type=str, default=None)
+    parser.add_argument(
+        "--polyak-tau",
+        type=float,
+        default=0.0,
+        help="V2-U : soft Polyak target update tau. Default 0.0 = hard sync. "
+             "Recommande V2-ZY : 0.005 pour reduire variance inter-seed.",
+    )
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -72,6 +79,7 @@ def main() -> int:
         eval_every_episodes=args.eval_every_episodes,
         eval_target_difficulty=args.eval_target_difficulty,
         best_checkpoint_path=args.best_checkpoint_path,
+        polyak_tau=args.polyak_tau,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,

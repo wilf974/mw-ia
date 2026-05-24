@@ -35,6 +35,12 @@ def main() -> int:
                              "le DRQN/LSTM oscille catastrophiquement avec update=200 V2-X)")
     parser.add_argument("--scheduler-step", type=float, default=0.05,
                         help="Pas de difficulté du scheduler (default V2-Y : 0.05)")
+    parser.add_argument(
+        "--polyak-tau",
+        type=float,
+        default=0.0,
+        help="V2-U : soft Polyak target update tau. Default 0.0 = hard sync.",
+    )
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -55,6 +61,7 @@ def main() -> int:
         lstm_hidden=args.lstm_hidden,
         sequence_length=args.sequence_length,
         epsilon_decay_steps=args.epsilon_decay_steps,
+        polyak_tau=args.polyak_tau,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,
