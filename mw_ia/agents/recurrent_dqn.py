@@ -52,6 +52,7 @@ class RecurrentDQNAgent(Agent):
         self.trainer = RecurrentDQNTrainer(
             self.online, self.target, lr=cfg.lr, gamma=cfg.gamma,
             device=str(self.device), use_amp=cfg.use_amp,
+            polyak_tau=cfg.polyak_tau,
         )
         self.buffer = SequenceReplayBuffer(
             cfg.replay_capacity, obs_dim, cfg.max_steps_per_episode, seed=seed,
@@ -122,9 +123,12 @@ class RecurrentDQNAgent(Agent):
             if losses:
                 self.last_loss = sum(losses) / len(losses)
                 metrics["loss"] = self.last_loss
-        if self.global_step // self.cfg.target_sync_steps > self.target_syncs:
-            self.trainer.sync_target()
-            self.target_syncs += 1
+        # V2-U : skip hard sync périodique si Polyak activé (le trainer.step()
+        # appelle déjà polyak_update à chaque train_step).
+        if self.cfg.polyak_tau == 0.0:
+            if self.global_step // self.cfg.target_sync_steps > self.target_syncs:
+                self.trainer.sync_target()
+                self.target_syncs += 1
         return metrics
 
     def learn(self, transition: Any) -> dict[str, float]:
