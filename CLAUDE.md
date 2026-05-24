@@ -724,6 +724,76 @@ Le plafond capacité diff=0.25-0.30 devient le **nouveau benchmark scientifique 
 4. **V2-V duck-typing** : ConvDQNAgent V2-Z n'a pas `begin_episode`, donc no-op pour V2-Z. ConvRecurrentDQNAgent V2-ZY a `begin_episode`, hidden reset entre seeds eval.
 5. **Replay buffer 2.4 GB** : trajectoires complètes V2-Y pattern. Si OOM, descendre `replay_capacity`.
 
+### V2-ZY — benchmark n=5 same-seed (2026-05-24, validation V2-V rigoureuse)
+
+**Protocole** : 5 runs V2-ZY ep=5000 GPU `--eval-target-difficulty 0.30 --best-checkpoint-path checkpoints/v2zy_best_seed{N}.pt`. Mêmes seeds que les benchmarks V2-W (0-4). Eval à diff=0.30 FIXE (10 seeds eval 10000-10009).
+
+**Résultats par seed (eval rigoureux greedy strict)** :
+
+| Seed | V2-W best @ diff=0.30 | **V2-ZY best @ diff=0.30** | Δ | V2-ZY final |
+|---|---|---|---|---|
+| 0 | 70 % | 50 % | −20 pp | 68 % @ diff=0.25 |
+| 1 | 70 % | **0 %** | **−70 pp** ❌ | 56 % @ diff=0.05 (collapse training) |
+| 2 | 60 % | 10 % | −50 pp | 59 % @ diff=0.15 |
+| 3 | 50 % | 50 % | =0 | 66 % @ diff=0.35 |
+| **4** | **40 %** | **100 %** | **+60 pp** ✓✓ | **73 % @ diff=0.55** (franchit bucket 2) |
+
+**Statistiques agrégées V2-ZY vs V2-W (n=5)** :
+
+| Métrique | V2-W | V2-ZY | Verdict |
+|---|---|---|---|
+| Mean best @ diff=0.30 | 58 % | **42 %** | −16 pp |
+| Std inter-seed | ~12 pp | **~38 pp** | variance 3× pire |
+| Best ≥ 70 % strict | 2/5 | **1/5** (seed 4 = 100 %) | −1 seed |
+| Best ≥ 50 % | 4/5 | 3/5 | −1 seed |
+| Max best | 70 % | **100 %** ✓ | +30 pp |
+| Max final diff atteinte | 0.40 | **0.55** ✓✓ | **bucket 2 franchi pour la 1ère fois** |
+
+**Critère succès V2-ZY spec (4/5 ≥ 70 % @ diff=0.30)** : **NON atteint** — 1/5 seulement (seed 4).
+
+**Verdict V2-ZY** :
+
+- ✅ **Mécaniquement validé** : combo réseau fonctionne, infrastructure V2-V intégrée
+- ⚠️ **Hypothèse "combo additif" PARTIELLEMENT INVALIDÉE** : V2-ZY ne fait pas mieux en moyenne que V2-W (42 % vs 58 %)
+- ✅ **Découverte majeure seed 4** : V2-ZY atteint 100 % @ diff=0.30 (premier sous-projet à le faire) ET franchit diff=0.55 (premier à dépasser bucket 1 vers bucket 2). **La capacité du modèle existe.**
+- ❌ **Variance d'apprentissage 3× pire** : std passe de ~12 pp (V2-W) à ~38 pp. La LSTM rajoute de l'instabilité au lieu de stabiliser.
+
+### Finding scientifique V2-ZY consolidé
+
+> **V2-W = robuste, V2-ZY = potentiel supérieur mais instable.**
+>
+> Le combo Conv+LSTM+Double DQN a une **capacité maximale supérieure** (seed 4 prouve qu'il peut atteindre 100 % @ diff=0.30 et bucket 2 @ diff=0.55) mais **converge rarement** (1/5 succès). Pattern classique en RL profond : **plus de capacité ≠ plus de robustesse**.
+
+**Lecture causale** :
+
+Le problème n'est probablement PAS la représentation (V2-Z débloque), ni la mémoire (V2-Y compense), ni la capacité théorique (seed 4 V2-ZY prouve qu'elle existe). Le problème est devenu **la dynamique d'entraînement** :
+
+- Hard sync target tous les 1000 steps peut casser brutalement les représentations Conv + hidden states LSTM
+- BPTT 32 steps + Conv chaining = plus de gradients à propager, plus sensible aux discontinuités target
+- 3.3 M params (vs V2-W 1.66 M) = plus dur à entraîner stable
+- Replay buffer trajectoires + scheduler dynamique amplifient les oscillations
+
+**Pattern observé** :
+- Seed 4 V2-ZY = trajectoire chanceuse stable (ep 99 → 2399 → 3399 → 4899, monotone croissante)
+- Seeds 1/2 V2-ZY = divergence catastrophique (pas de progression sur 5000 ép)
+
+Cohérent avec un problème de **stabilité target network**.
+
+### Prochain levier — V2-U Polyak soft target
+
+**Hypothèse V2-U** :
+> Remplacer hard sync target tous les 1000 steps par soft Polyak update `τ ≈ 0.005` à chaque step. Devrait réduire la variance inter-seed de V2-ZY (std 38 pp → cible < 15 pp) sans réduire la capacité maximale (seed 4 = 100 % devrait rester accessible).
+
+**Vrai test V2-U** :
+- Critère primaire : **variance inter-seed réduite** (pas le max score)
+- Critère secondaire : mean similaire ou meilleur
+- Si validé sur V2-ZY → appliquer aussi à V2-W (et re-tester V2-W avec Polyak)
+
+**Méthodologie V2-U recommandée** :
+1. Cycle complet brainstorm + spec + plan + impl TDD (~50 LOC modif `_ConvDQNTrainer` + `RecurrentDQNTrainer`)
+2. Benchmark same-seed n=5 V2-ZY+Polyak vs V2-ZY hard sync (la SEULE variable changée = règle target update)
+3. Si succès → re-benchmark V2-W+Polyak (consolidation transverse)
+
 ---
 
 ## Objectif long-terme & Roadmap d'évolutions
@@ -1028,21 +1098,22 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 
 **Story scientifique consolidée n=5** : représentation spatiale (V2-Z) + Double DQN (V2-W) doublent le mean diff mais ne résolvent PAS le **bottleneck #3 = stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique**. Le finding pratique : **le meilleur agent V2-W existe avant ep 3500, l'entraînement après le détruit sur certains seeds**.
 
-**Prochaines étapes prioritaires (post V2-ZY livré 2026-05-23)** :
+**Prochaines étapes prioritaires (post V2-ZY benchmark n=5 2026-05-24)** :
 
-1. ✅ **V2-ZY CNN + LSTM + Double DQN combiné** — **LIVRÉ** (tag `v0.2.0-zy`) : combo des 3 leviers + V2-V eval.
+1. ✅ **V2-ZY CNN + LSTM + Double DQN combiné** — **LIVRÉ** (tag `v0.2.0-zy`) + **BENCHMARK n=5 EFFECTUÉ**.
+   Finding : V2-W = robuste, V2-ZY = potentiel supérieur (seed 4 : 100 % @ diff=0.30, bucket 2 franchi à diff=0.55) MAIS variance d'apprentissage 3× pire. Hypothèse "combo additif" partiellement invalidée. Bottleneck identifié : **stabilité target network**.
 
-2. **Benchmark V2-ZY n=5 ep=5000 same-seed** — validation scientifique non-bloquante :
-   - Lancer 5 runs V2-ZY ep=5000 avec `--eval-target-difficulty 0.30 --best-checkpoint-path checkpoints/v2zy_best_seed{N}.pt`
-   - Comparer best @ diff=0.30 vs V2-W n=5 (mean 58 %, 2/5 ≥ 70 %)
-   - **Critère succès** : 4/5 seeds avec best ≥ 70 % @ diff=0.30
-   - Si critère atteint → benchmark bonus @ diff=0.40
+2. **V2-U Polyak soft target — PROCHAIN SOUS-PROJET RECOMMANDÉ** :
+   - Remplacer hard sync target tous les 1000 steps par soft Polyak update `τ ≈ 0.005` à chaque step
+   - **Hypothèse** : réduire variance inter-seed V2-ZY (std 38 pp → cible < 15 pp) sans réduire capacité max (seed 4 = 100 % doit rester accessible)
+   - **Critère succès primaire** : variance ↓, pas max score
+   - Application transverse V2-ZY puis V2-W si validé
+   - Périmètre : ~50 LOC modif `_ConvDQNTrainer` + `RecurrentDQNTrainer`, cycle complet brainstorm + spec + plan + impl TDD
 
-3. **Sous-projets V3+ déblocables** :
-   - **Soft target Polyak τ=0.005** : élimine le résidu de collapse tardif
-   - **R2D2 burn-in** : remplace DRQN simple par burn-in pour stabilité LSTM
+3. **Sous-projets V3+ déblocables** (post V2-U si succès) :
+   - **R2D2 burn-in** : remplace DRQN simple par burn-in pour stabilité LSTM long-terme
    - **Mazes larges (max_size=15/20)** : test translation equivariance CNN
-   - **Sous-projet B (mémoire persistante cross-session)**
+   - **Sous-projet B (mémoire persistante cross-session)** : maintenant viable car best-checkpoint + Polyak protègent l'agent stable
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
