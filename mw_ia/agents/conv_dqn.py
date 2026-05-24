@@ -205,9 +205,12 @@ class ConvDQNAgent:
             batch = self.buffer.sample(self.cfg.batch_size)
             self.last_loss = self.trainer.step(batch)
             metrics["loss"] = self.last_loss
-        if self.global_step % self.cfg.target_sync_steps == 0:
-            self.trainer.sync_target()
-            self.target_syncs += 1
+        # V2-U : skip hard sync périodique si Polyak activé (le trainer.step()
+        # appelle déjà polyak_update à chaque train_step).
+        if self.cfg.polyak_tau == 0.0:
+            if self.global_step % self.cfg.target_sync_steps == 0:
+                self.trainer.sync_target()
+                self.target_syncs += 1
         return metrics
 
     def save(self, path: str | Path) -> None:

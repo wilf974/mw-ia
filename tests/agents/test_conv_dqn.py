@@ -166,3 +166,41 @@ def test_double_dqn_branch_differs_from_standard() -> None:
     assert not torch.allclose(q_next_dqn, q_next_double), (
         "Double DQN doit différer de DQN classique quand online ≠ target"
     )
+
+
+def test_polyak_tau_skips_hard_sync() -> None:
+    """V2-U : avec polyak_tau > 0, hard sync périodique skip."""
+    cfg = ConvDQNConfig(
+        polyak_tau=0.005,
+        target_sync_steps=2,
+        min_replay_to_learn=10_000,  # disable train_step
+        use_amp=False,
+    )
+    agent = ConvDQNAgent(
+        in_channels=3, rows=10, cols=10, n_actions=4,
+        cfg=cfg, device="cpu", seed=0,
+    )
+    obs = np.zeros((3, 10, 10), dtype=np.float32)
+    for _ in range(5):
+        agent.observe(obs, action=0, reward=0.0, next_state=obs, done=False)
+    # target_syncs n'a jamais été incrémenté car Polyak prend le relais
+    assert agent.target_syncs == 0
+
+
+def test_polyak_tau_zero_preserves_hard_sync() -> None:
+    """V2-U : avec polyak_tau=0.0 (default), hard sync s'active comme baseline V2-W."""
+    cfg = ConvDQNConfig(
+        polyak_tau=0.0,
+        target_sync_steps=2,
+        min_replay_to_learn=10_000,
+        use_amp=False,
+    )
+    agent = ConvDQNAgent(
+        in_channels=3, rows=10, cols=10, n_actions=4,
+        cfg=cfg, device="cpu", seed=0,
+    )
+    obs = np.zeros((3, 10, 10), dtype=np.float32)
+    for _ in range(5):
+        agent.observe(obs, action=0, reward=0.0, next_state=obs, done=False)
+    # target_syncs doit avoir été incrémenté (ép 2, 4 → 2 syncs)
+    assert agent.target_syncs >= 2
