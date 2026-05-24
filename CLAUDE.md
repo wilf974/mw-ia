@@ -38,6 +38,7 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 | **W** | Double DQN sur ConvDQN (roadmap #7) | ✅ Livré (tag `v0.2.0-w`) |
 | **V** | Training Protocol Stabilization (eval + best-checkpoint) | ✅ Livré (tag `v0.2.0-v`) |
 | **ZY** | CNN + LSTM + Double DQN combiné | ✅ Livré (tag `v0.2.0-zy`) |
+| **U** | Polyak soft target update | ✅ Livré (tag `v0.2.0-u`) |
 | **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
@@ -1098,29 +1099,73 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 
 **Story scientifique consolidée n=5** : représentation spatiale (V2-Z) + Double DQN (V2-W) doublent le mean diff mais ne résolvent PAS le **bottleneck #3 = stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique**. Le finding pratique : **le meilleur agent V2-W existe avant ep 3500, l'entraînement après le détruit sur certains seeds**.
 
-**Prochaines étapes prioritaires (post V2-ZY benchmark n=5 2026-05-24)** :
+### V2-U — état final des phases (livraison 2026-05-24)
 
-1. ✅ **V2-ZY CNN + LSTM + Double DQN combiné** — **LIVRÉ** (tag `v0.2.0-zy`) + **BENCHMARK n=5 EFFECTUÉ**.
-   Finding : V2-W = robuste, V2-ZY = potentiel supérieur (seed 4 : 100 % @ diff=0.30, bucket 2 franchi à diff=0.55) MAIS variance d'apprentissage 3× pire. Hypothèse "combo additif" partiellement invalidée. Bottleneck identifié : **stabilité target network**.
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Scaffold test_polyak_update.py | T1 | ✅ | 0 | 1 |
+| 2 — `polyak_update()` dans `_ConvDQNTrainer` | T2 | ✅ | 5 | 1 |
+| 3+4 — `polyak_tau` ConvDQNConfig + branche `_ConvDQNTrainer.step()` | T3-T4 | ✅ | 1 | 1 |
+| 5 — `ConvDQNAgent` skip hard sync si Polyak | T5 | ✅ | 2 | 1 |
+| 6 — `RecurrentDQNTrainer` extension Polyak | T6 | ✅ | 1 | 1 |
+| 7 — `DRQNConfig` polyak_tau field | T7 | ✅ | 1 | 1 |
+| 8 — `ConvRecurrentDQNConfig` polyak_tau field | T8 | ✅ | 1 | 1 |
+| 9 — `RecurrentDQNAgent` skip hard sync | T9 | ✅ | 1 | 1 |
+| 10 — `ConvRecurrentDQNAgent` skip hard sync | T10 | ✅ | 1 | 1 |
+| 11 — CLI flags `--polyak-tau` × 3 scripts | T11 | ✅ | 0 | 1 |
+| 12 — CI smoke V2-U | T12 | ✅ | 0 | 1 |
+| 13 — README + CLAUDE.md + tag `v0.2.0-u` | T13 | ✅ | 0 | 1 + tag |
 
-2. **V2-U Polyak soft target — PROCHAIN SOUS-PROJET RECOMMANDÉ** :
-   - Remplacer hard sync target tous les 1000 steps par soft Polyak update `τ ≈ 0.005` à chaque step
-   - **Hypothèse** : réduire variance inter-seed V2-ZY (std 38 pp → cible < 15 pp) sans réduire capacité max (seed 4 = 100 % doit rester accessible)
-   - **Critère succès primaire** : variance ↓, pas max score
-   - Application transverse V2-ZY puis V2-W si validé
-   - Périmètre : ~50 LOC modif `_ConvDQNTrainer` + `RecurrentDQNTrainer`, cycle complet brainstorm + spec + plan + impl TDD
+### Composants V2-U livrés
 
-3. **Sous-projets V3+ déblocables** (post V2-U si succès) :
-   - **R2D2 burn-in** : remplace DRQN simple par burn-in pour stabilité LSTM long-terme
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `polyak_update(tau)` dans `_ConvDQNTrainer` | `mw_ia/agents/conv_dqn.py` | Soft update target ← τ × online + (1−τ) × target, in-place via `mul_().add_()`. |
+| `polyak_update(tau)` dans `RecurrentDQNTrainer` | `mw_ia/neural/recurrent_trainer.py` | Idem pattern. Réutilisé par V2-Y et V2-ZY. |
+| Champ `polyak_tau: float = 0.0` | `ConvDQNConfig`, `DRQNConfig`, `ConvRecurrentDQNConfig` (`mw_ia/config.py`) | Default 0.0 = hard sync (backwards compat). Validation [0, 1]. |
+| Skip hard sync conditionnel | 3 agents (`ConvDQNAgent.observe`, `RecurrentDQNAgent.end_episode`, `ConvRecurrentDQNAgent.end_episode`) | Si `cfg.polyak_tau > 0`, skip `target_sync_steps` periodic hard sync. |
+| CLI flag `--polyak-tau` | 3 scripts | Default 0.0. Activation V2-U via `--polyak-tau 0.005`. |
+
+### Décisions techniques V2-U
+
+- **Formule Polyak** : `target ← τ × online + (1−τ) × target`, in-place via `p_target.data.mul_(1-tau).add_(p_online.data, alpha=tau)`. Standard Lillicrap 2015 DDPG.
+- **`with torch.no_grad()`** autour de la formule (pas de grad accumulation).
+- **Activation par train_step, pas par step env** : appliqué dans `trainer.step()` post-optimizer.
+- **Skip hard sync si Polyak** : évite double-update. Logique dans `agent.observe()/end_episode()` : `if cfg.polyak_tau == 0.0: hard_sync`.
+- **Default 0.0 partout** : backwards compat strict. V2-W/V2-Y/V2-ZY baselines n=5 reproductibles sans modif. Strict opt-in via CLI.
+- **τ = 0.005 recommandé** : standard DDPG/SAC. Smoothing constant ~200 train_steps.
+
+### V2-U — pièges connus
+
+1. **Double-update target si Polyak ET hard sync pas skip** : logique skip dans agent. Tests vérifient `target_syncs == 0` quand Polyak activé.
+2. **Polyak n'inclut pas les buffers BN/LN** : `parameters()` suffit pour réseaux actuels (Conv2d/ReLU/Linear/LSTM). À noter pour R2D2 LayerNorm futur.
+3. **AMP + Polyak** : `polyak_update` en `torch.no_grad()` mais PAS sous autocast. Storage float32 → safe.
+4. **τ trop conservateur ou trop agressif ?** : 0.005 default littéraire. Si V2-U échoue, grid search τ ∈ {0.001, 0.01, 0.05}.
+5. **CLI help text en ASCII** : Windows cp1252 ne peut pas encoder `τ` lors de `--help`. Le help-text utilise "tau" + accents retirés. Cohérent avec piège #8 du CLAUDE.md.
+
+**Prochaines étapes prioritaires (post V2-U livré 2026-05-24)** :
+
+1. ✅ **V2-U Polyak soft target** — **LIVRÉ** (tag `v0.2.0-u`) : `polyak_tau` opt-in dans 3 configs DQN + 2 trainers + 3 agents + 3 CLI scripts.
+
+2. **Benchmark V2-ZY+Polyak n=5 ep=5000 same-seed** — validation scientifique non-bloquante :
+   - Lancer 5 runs V2-ZY ep=5000 avec `--polyak-tau 0.005 --best-checkpoint-path checkpoints/v2u_zy_best_seed{N}.pt`
+   - Comparer best @ diff=0.30 vs V2-ZY baseline n=5 (mean 42 %, std 38 pp, seed 4 = 100 %)
+   - **Critère succès primaire** : std < 20 pp (vs 38 pp baseline)
+   - **Pas de cible sur le mean** — finding est pur gain de robustesse
+   - Si critère atteint → re-benchmark V2-W+Polyak (consolidation transverse)
+   - Si critère non atteint → grid search τ ∈ {0.001, 0.01, 0.05} ou R2D2 burn-in
+
+3. **Sous-projets V3+ déblocables** (post V2-U benchmark) :
+   - **R2D2 burn-in** : stabiliser LSTM directement
    - **Mazes larges (max_size=15/20)** : test translation equivariance CNN
-   - **Sous-projet B (mémoire persistante cross-session)** : maintenant viable car best-checkpoint + Polyak protègent l'agent stable
+   - **Sous-projet B (mémoire persistante cross-session)**
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 252 passed. + `bash aether/verify_all.sh` → 8 OK.
+   Attendu : 265 passed. + `bash aether/verify_all.sh` → 8 OK.
 3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
@@ -1131,8 +1176,8 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 252 passed)
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy`, `v0.2.0-u` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 265 passed)
 - Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`, `mw_ia/neural/conv_recurrent.py`, `mw_ia/agents/conv_recurrent_dqn.py`) sans raison documentée
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)

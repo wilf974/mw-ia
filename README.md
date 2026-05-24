@@ -388,6 +388,43 @@ python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles
 
 4/5 seeds avec `best_checkpoint @ diff=0.30 ≥ 70 %` en eval rigoureux V2-V.
 
+## V2-U — Polyak soft target update (sous-projet livré)
+
+**Tag** : `v0.2.0-u` — **Tests** : 265 verts (252 baseline + 13 V2-U)
+
+Sous-projet pour stabiliser V2-ZY (variance inter-seed 38 pp → cible < 20 pp) sans dégrader la capacité maximale.
+
+### Hypothèse
+
+Remplacer hard sync target tous les N steps par soft Polyak update `target ← τ × online + (1−τ) × target` à chaque train_step avec τ ≈ 0.005. Devrait réduire les oscillations target Q et stabiliser Conv+LSTM+BPTT.
+
+### Usage CLI (opt-in via `--polyak-tau`)
+
+```bash
+# V2-ZY + Polyak (recommandé)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --polyak-tau 0.005 \
+    --best-checkpoint-path checkpoints/v2u_best_seed0.pt
+
+# V2-W + Polyak (validation transverse)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --polyak-tau 0.005
+
+# Baseline (V2-W/V2-Y/V2-ZY actuel : hard sync)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+```
+
+### Architecture
+
+- Champ `polyak_tau: float = 0.0` ajouté à `ConvDQNConfig`, `DRQNConfig`, `ConvRecurrentDQNConfig`. Default 0.0 = hard sync (backwards compat strict).
+- Méthode `polyak_update(tau)` ajoutée à `_ConvDQNTrainer` (V2-Z/W) et `RecurrentDQNTrainer` (V2-Y/ZY). Mix in-place via `mul_().add_()` sur `parameters()` itération.
+- Branche conditionnelle dans `step()` post-optimizer : `if self.polyak_tau > 0.0: self.polyak_update(self.polyak_tau)`.
+- Agents skip le hard sync périodique si `cfg.polyak_tau > 0` (évite double-update).
+
+### Critère succès
+
+Variance inter-seed best @ diff=0.30 sur V2-ZY+Polyak n=5 **< 20 pp** (vs 38 pp baseline V2-ZY).
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
