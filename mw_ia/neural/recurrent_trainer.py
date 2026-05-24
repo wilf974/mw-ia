@@ -31,11 +31,13 @@ class RecurrentDQNTrainer:
         device: str = "cuda",
         use_amp: bool = True,
         double_dqn: bool = False,
+        polyak_tau: float = 0.0,
     ) -> None:
         self.online = online
         self.target = target
         self.gamma = gamma
         self.double_dqn = double_dqn
+        self.polyak_tau = polyak_tau
         self.device = torch.device(device)
         self.use_amp = bool(use_amp and self.device.type == "cuda")
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=lr)
@@ -46,6 +48,17 @@ class RecurrentDQNTrainer:
 
     def sync_target(self) -> None:
         self.target.load_state_dict(self.online.state_dict())
+
+    def polyak_update(self, tau: float) -> None:
+        """Soft update target ← τ × online + (1−τ) × target, in-place.
+
+        Voir spec V2-U : docs/superpowers/specs/2026-05-24-mw-ia-polyak-soft-target-design.md
+        """
+        with torch.no_grad():
+            for p_target, p_online in zip(
+                self.target.parameters(), self.online.parameters()
+            ):
+                p_target.data.mul_(1.0 - tau).add_(p_online.data, alpha=tau)
 
     def step(self, batch: BatchSeq) -> float:
         states = torch.from_numpy(batch.states).to(self.device, non_blocking=True)
@@ -94,5 +107,9 @@ class RecurrentDQNTrainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.online.parameters(), max_norm=10.0)
             self.optimizer.step()
+
+        # V2-U : soft Polyak update à chaque train_step si tau > 0
+        if self.polyak_tau > 0.0:
+            self.polyak_update(self.polyak_tau)
 
         return float(loss.detach().item())

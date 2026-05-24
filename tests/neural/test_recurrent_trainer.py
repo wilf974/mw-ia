@@ -101,3 +101,45 @@ def test_double_dqn_branch_differs_from_standard(cpu_device: torch.device) -> No
     assert not torch.allclose(q_next_dqn, q_next_double), (
         "Double DQN doit differer de DQN classique quand online != target"
     )
+
+
+def test_polyak_update_changes_target_in_step(cpu_device: torch.device) -> None:
+    """V2-U : avec polyak_tau > 0, target params changent après step()."""
+    import numpy as np
+
+    from mw_ia.neural.recurrent import RecurrentQNetwork
+    from mw_ia.neural.recurrent_trainer import RecurrentDQNTrainer
+    from mw_ia.neural.sequence_buffer import SequenceReplayBuffer
+
+    online = RecurrentQNetwork(input_dim=300, n_actions=4, fc_hidden=64, lstm_hidden=32).to(cpu_device)
+    target = RecurrentQNetwork(input_dim=300, n_actions=4, fc_hidden=64, lstm_hidden=32).to(cpu_device)
+    target.load_state_dict(online.state_dict())
+    # Désynchroniser online pour que Polyak ait un effet
+    with torch.no_grad():
+        for p in online.parameters():
+            p.add_(0.5)
+
+    trainer = RecurrentDQNTrainer(
+        online, target,
+        lr=1e-3, gamma=0.99, device="cpu", use_amp=False,
+        polyak_tau=0.5,  # τ=0.5 pour effet maximal sur 1 step
+    )
+
+    # Snapshot target avant step
+    target_before = {name: p.clone() for name, p in target.named_parameters()}
+
+    # Construire un batch minimal
+    buffer = SequenceReplayBuffer(capacity=10, obs_dim=300, max_steps=8, seed=0)
+    traj = [(np.zeros(300, np.float32), 0, 0.0, np.zeros(300, np.float32), False)] * 4
+    buffer.push_trajectory(traj)
+    buffer.push_trajectory(traj)
+    batch = buffer.sample(batch_size=2, seq_len=4)
+    trainer.step(batch)
+
+    # Target params ont changé (Polyak update appliqué)
+    target_changed = False
+    for name, p_after in target.named_parameters():
+        if not torch.allclose(p_after, target_before[name]):
+            target_changed = True
+            break
+    assert target_changed, "Polyak update n'a pas modifié target après step()"
