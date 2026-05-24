@@ -61,6 +61,17 @@ class _ConvDQNTrainer:
     def sync_target(self) -> None:
         self.target.load_state_dict(self.online.state_dict())
 
+    def polyak_update(self, tau: float) -> None:
+        """Soft update target ← τ × online + (1−τ) × target, in-place.
+
+        Voir spec V2-U : docs/superpowers/specs/2026-05-24-mw-ia-polyak-soft-target-design.md
+        """
+        with torch.no_grad():
+            for p_target, p_online in zip(
+                self.target.parameters(), self.online.parameters()
+            ):
+                p_target.data.mul_(1.0 - tau).add_(p_online.data, alpha=tau)
+
     def step(self, batch: Batch) -> float:
         B = batch.states.shape[0]
         shape = (B, self.in_channels, self.rows, self.cols)
