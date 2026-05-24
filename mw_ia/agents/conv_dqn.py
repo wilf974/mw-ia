@@ -43,6 +43,7 @@ class _ConvDQNTrainer:
         device: str = "cuda",
         use_amp: bool = True,
         double_dqn: bool = True,
+        polyak_tau: float = 0.0,
     ) -> None:
         self.online = online
         self.target = target
@@ -53,6 +54,7 @@ class _ConvDQNTrainer:
         self.device = torch.device(device)
         self.use_amp = bool(use_amp and self.device.type == "cuda")
         self.double_dqn = double_dqn
+        self.polyak_tau = polyak_tau
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=lr)
         self.loss_fn = nn.SmoothL1Loss()
         self._scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -115,6 +117,9 @@ class _ConvDQNTrainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.online.parameters(), max_norm=10.0)
             self.optimizer.step()
+        # V2-U : soft Polyak update à chaque train_step si tau > 0
+        if self.polyak_tau > 0.0:
+            self.polyak_update(self.polyak_tau)
         return float(loss.detach().item())
 
 
@@ -157,6 +162,7 @@ class ConvDQNAgent:
             lr=cfg.lr, gamma=cfg.gamma,
             device=str(self.device), use_amp=cfg.use_amp,
             double_dqn=cfg.double_dqn,
+            polyak_tau=cfg.polyak_tau,
         )
         obs_dim = in_channels * rows * cols
         self.buffer = ReplayBuffer(cfg.replay_capacity, obs_dim, seed=seed)

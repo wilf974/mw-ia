@@ -251,6 +251,7 @@ class ConvDQNConfig:
     train_every: int = 4
     use_amp: bool = True
     double_dqn: bool = True   # V2-W : Hasselt 2015. False = V2-Z baseline DQN classique.
+    polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak (Lillicrap 2015).
     # V2-V : Training Protocol Stabilization (eval périodique + best-checkpoint)
     eval_enabled: bool = True
     eval_every_episodes: int = 100
@@ -320,6 +321,10 @@ class ConvDQNConfig:
         if not (0.0 <= self.eval_target_difficulty <= 1.0):
             raise ValueError(
                 f"eval_target_difficulty doit être ∈ [0,1], reçu {self.eval_target_difficulty}"
+            )
+        if not (0.0 <= self.polyak_tau <= 1.0):
+            raise ValueError(
+                f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
             )
 
 
