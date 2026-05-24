@@ -118,3 +118,27 @@ def test_aether_smoke() -> None:
         target_sync_steps=cfg.target_sync_steps,
     )
     assert verify_formal(spec).passed
+
+
+def test_v2zy_polyak_tau_skips_hard_sync() -> None:
+    """V2-U : V2-ZY agent avec polyak_tau > 0 skip hard sync périodique."""
+    cfg = ConvRecurrentDQNConfig(
+        polyak_tau=0.005,
+        target_sync_steps=2,
+        min_episodes_to_learn=10_000,
+        use_amp=False,
+        sequence_length=4,
+        max_steps_per_episode=8,
+    )
+    agent = ConvRecurrentDQNAgent(
+        in_channels=3, rows=10, cols=10, n_actions=4,
+        cfg=cfg, device="cpu", seed=0,
+    )
+    obs = np.zeros((3, 10, 10), dtype=np.float32)
+    for _ in range(5):
+        agent.reset_hidden()
+        agent.begin_episode()
+        for _ in range(4):
+            agent.observe(obs, action=0, reward=0.0, next_state=obs, done=False)
+        agent.end_episode()
+    assert agent.target_syncs == 0

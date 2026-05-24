@@ -61,6 +61,7 @@ class ConvRecurrentDQNAgent(Agent):
             lr=cfg.lr, gamma=cfg.gamma,
             device=str(self.device), use_amp=cfg.use_amp,
             double_dqn=cfg.double_dqn,
+            polyak_tau=cfg.polyak_tau,
         )
         obs_dim_flat = in_channels * rows * cols
         self.buffer = SequenceReplayBuffer(
@@ -135,9 +136,11 @@ class ConvRecurrentDQNAgent(Agent):
             if losses:
                 self.last_loss = sum(losses) / len(losses)
                 metrics["loss"] = self.last_loss
-        if self.global_step // self.cfg.target_sync_steps > self.target_syncs:
-            self.trainer.sync_target()
-            self.target_syncs += 1
+        # V2-U : skip hard sync périodique si Polyak activé.
+        if self.cfg.polyak_tau == 0.0:
+            if self.global_step // self.cfg.target_sync_steps > self.target_syncs:
+                self.trainer.sync_target()
+                self.target_syncs += 1
         return metrics
 
     def learn(self, transition: Any) -> dict[str, float]:
