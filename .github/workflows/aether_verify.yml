@@ -43,6 +43,11 @@ jobs:
           mkdir -p checkpoints
           python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles --device cpu --eval-every-episodes 5 --best-checkpoint-path checkpoints/ci_v2zy_best.pt
           test -f checkpoints/ci_v2zy_best.pt
+      - name: Smoke test V2-U Polyak soft target on V2-ZY
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles --device cpu --polyak-tau 0.005 --eval-every-episodes 5 --best-checkpoint-path checkpoints/ci_v2u_best.pt
+          test -f checkpoints/ci_v2u_best.pt
 
   aether-files:
     runs-on: ubuntu-latest
