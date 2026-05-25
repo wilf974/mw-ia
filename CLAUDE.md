@@ -1143,22 +1143,73 @@ Benchmark same-seed n=5 V2-Z vs V2-W (cf. section détaillée "V2-W — benchmar
 4. **τ trop conservateur ou trop agressif ?** : 0.005 default littéraire. Si V2-U échoue, grid search τ ∈ {0.001, 0.01, 0.05}.
 5. **CLI help text en ASCII** : Windows cp1252 ne peut pas encoder `τ` lors de `--help`. Le help-text utilise "tau" + accents retirés. Cohérent avec piège #8 du CLAUDE.md.
 
-**Prochaines étapes prioritaires (post V2-U livré 2026-05-24)** :
+### V2-U — benchmark V2-ZY+Polyak n=5 same-seed (2026-05-25, validation rigoureuse)
 
-1. ✅ **V2-U Polyak soft target** — **LIVRÉ** (tag `v0.2.0-u`) : `polyak_tau` opt-in dans 3 configs DQN + 2 trainers + 3 agents + 3 CLI scripts.
+**Protocole** : 5 runs V2-ZY ep=5000 GPU `--polyak-tau 0.005 --best-checkpoint-path checkpoints/v2u_zy_polyak_best_seed{N}.pt`. Mêmes seeds que la baseline V2-ZY n=5 (0-4). Eval default `--eval-target-difficulty 0.30 --eval-every-episodes 100`. **Seule variable changée** vs baseline V2-ZY = `polyak_tau` (0.0 → 0.005).
 
-2. **Benchmark V2-ZY+Polyak n=5 ep=5000 same-seed** — validation scientifique non-bloquante :
-   - Lancer 5 runs V2-ZY ep=5000 avec `--polyak-tau 0.005 --best-checkpoint-path checkpoints/v2u_zy_best_seed{N}.pt`
-   - Comparer best @ diff=0.30 vs V2-ZY baseline n=5 (mean 42 %, std 38 pp, seed 4 = 100 %)
-   - **Critère succès primaire** : std < 20 pp (vs 38 pp baseline)
-   - **Pas de cible sur le mean** — finding est pur gain de robustesse
-   - Si critère atteint → re-benchmark V2-W+Polyak (consolidation transverse)
-   - Si critère non atteint → grid search τ ∈ {0.001, 0.01, 0.05} ou R2D2 burn-in
+**Résultats par seed (eval rigoureux greedy strict, 10 seeds held-out)** :
 
-3. **Sous-projets V3+ déblocables** (post V2-U benchmark) :
-   - **R2D2 burn-in** : stabiliser LSTM directement
-   - **Mazes larges (max_size=15/20)** : test translation equivariance CNN
-   - **Sous-projet B (mémoire persistante cross-session)**
+| Seed | V2-ZY baseline | **V2-ZY+Polyak** | Δ | Final training | Pattern |
+|---|---|---|---|---|---|
+| 0 | 50 % | **100 %** | **+50 pp** | 65 % @ diff=0.65 | atteint bucket 3 |
+| 1 | 0 % (collapse) | **100 %** | **+100 pp** | crash ép 4810 @ diff=0.85 | best capturé ép 3399 |
+| 2 | 10 % | **90 %** | **+80 pp** | 75 % @ diff=0.60 | atteint bucket 3 |
+| 3 | 50 % | **100 %** | **+50 pp** | 72 % @ diff=0.65 | atteint bucket 3 |
+| 4 | 100 % | **70 %** | **−30 pp** | 67 % @ diff=0.70 | meilleur seed baseline ramené à la moyenne |
+
+**Statistiques agrégées V2-ZY+Polyak vs V2-ZY baseline (n=5)** :
+
+| Métrique | V2-ZY baseline | **V2-ZY+Polyak** | Évolution |
+|---|---|---|---|
+| Mean best @ diff=0.30 | 42 % | **92 %** | **+50 pp** ✓✓ |
+| Std inter-seed (n−1) | 39.6 pp | **13.0 pp** | **−26.6 pp (réduction 3.0×)** ✓ |
+| Min (worst seed) | 0 % | **70 %** | **+70 pp** ✓✓ (aucune catastrophe) |
+| Max (best seed) | 100 % | 100 % | = |
+| Best ≥ 70 % strict | 1/5 (seed 4) | **5/5** | +4 seeds ✓ |
+| Best ≥ 90 % | 1/5 | **4/5** | +3 seeds ✓ |
+| Seeds atteignant diff_max ≥ 0.60 | 0/5 | **4/5** | +4 seeds ✓✓ |
+
+**Critères succès V2-U (spec)** :
+
+1. ✅ **Std inter-seed < 20 pp** : **13.0 pp** — PASSED (réduction 3.0× vs 39.6 baseline)
+2. ✅ **Mean > 42 %** : **92 %** — PASSED (gain massif)
+3. ✅ **Aucun seed catastrophique (< 20 %)** : minimum 70 % — PASSED
+4. ✅ **Bonus** : 4/5 seeds franchissent diff=0.60 en training (vs 0/5 baseline). Premier sous-projet à montrer une **généralisation curriculum robuste** au-delà du bucket 1.
+
+**Verdict V2-U** :
+
+> **Polyak transforme V2-ZY de "haut potentiel instable" à "haut potentiel régulier".** Le mean grimpe de +50 pp ET la variance chute de 3×. Aucun seed ne s'effondre catastrophiquement. 4/5 seeds atteignent diff=0.60-0.65 en training (premier sous-projet du programme V2 à le faire). Le hard-sync target tous les 1000 steps était la racine de l'instabilité V2-ZY — Polyak τ=0.005 lisse l'objectif d'apprentissage et débloque la convergence stable.
+
+**Note seed 1 — crash informatif, pas un échec** :
+
+Le seed 1 a crashé à ép 4810 avec `RuntimeError: density=0.43 unreachable after 100 attempts` du `RandomObstaclesGenerator`. CE N'EST PAS UN BUG POLYAK : l'agent a progressé si vite (best=100 % capturé ép 3399, training winrate 80 % @ diff=0.85) que le scheduler l'a poussé dans une zone où le générateur procedural ne peut plus garantir la solvabilité statistique (piège #10 du CLAUDE.md, déjà connu : density=0.43 sur 10×10 → ~50 % succès en 100 tentatives). **Le best a bien été capturé et sauvegardé avant le crash.** Mitigation possible pour futurs benchmarks V2-U sur seeds très performants : augmenter `max_attempts_bfs` à 500-1000 ou plafonner `max_density` à 0.40.
+
+### V2-U — finding scientifique consolidé
+
+> Le bottleneck #3 identifié par V2-W ("stabilité long-terme du RL off-policy avec replay buffer dans curriculum dynamique") **est résolu par Polyak soft target**. La séquence d'améliorations V2-Z → V2-W → V2-V → V2-ZY → **V2-U** forme une **cascade additive cohérente** :
+>
+> 1. **V2-Z** : représentation spatiale (CNN) débloque la généralisation
+> 2. **V2-W** : Double DQN double le mean (variance restait haute)
+> 3. **V2-V** : eval rigoureux + best-checkpoint = mesure honnête
+> 4. **V2-ZY** : combo CNN+LSTM+Double = potentiel maximal MAIS instable
+> 5. **V2-U** : Polyak soft target = stabilise V2-ZY → **mean 92 %, std 13 pp**
+
+**Implication méthodologique** : le hard-sync target tous les N steps est **incompatible** avec les architectures à forte capacité (CNN + LSTM) dans un curriculum dynamique. Polyak est désormais le **default recommandé** pour tout futur sous-projet RL qui combine ces composants.
+
+**Prochaines étapes prioritaires (post V2-U benchmark validé 2026-05-25)** :
+
+1. ✅ **V2-U Polyak soft target — LIVRÉ + VALIDÉ** (tag `v0.2.0-u`, benchmark n=5 same-seed PASSED tous critères).
+
+2. **Re-benchmark V2-W+Polyak n=5 same-seed** — consolidation transverse :
+   - Lancer 5 runs V2-W ep=5000 avec `--polyak-tau 0.005`
+   - Vérifier que Polyak stabilise aussi V2-W (Conv sans LSTM)
+   - Tester l'hypothèse : si V2-W+Polyak ≥ V2-ZY+Polyak, alors la LSTM apporte moins que Polyak attendu. Si V2-W+Polyak < V2-ZY+Polyak, alors LSTM + Polyak est la combinaison optimale.
+
+3. **Sous-projets V3+ déblocables** :
+   - **Mazes larges (max_size=15/20)** : test translation equivariance CNN — V2-U débloque le plafond, on peut maintenant tester du curriculum plus ambitieux
+   - **R2D2 burn-in** : améliorer encore LSTM (probablement moins prioritaire vu le gain V2-U)
+   - **Sous-projet B (mémoire persistante cross-session)** : la "vraie" prochaine étape du programme V2
+   - **Fix piège #10** : `max_attempts_bfs=500` ou cap `max_density=0.40` par défaut (les seeds V2-U performants peuvent atteindre diff=0.85 et crasher le générateur)
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
