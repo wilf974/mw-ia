@@ -1196,20 +1196,69 @@ Le seed 1 a crashé à ép 4810 avec `RuntimeError: density=0.43 unreachable aft
 
 **Implication méthodologique** : le hard-sync target tous les N steps est **incompatible** avec les architectures à forte capacité (CNN + LSTM) dans un curriculum dynamique. Polyak est désormais le **default recommandé** pour tout futur sous-projet RL qui combine ces composants.
 
-**Prochaines étapes prioritaires (post V2-U benchmark validé 2026-05-25)** :
+### V2-U — benchmark V2-W+Polyak n=5 same-seed (2026-05-25, contrôle transverse)
 
-1. ✅ **V2-U Polyak soft target — LIVRÉ + VALIDÉ** (tag `v0.2.0-u`, benchmark n=5 same-seed PASSED tous critères).
+**Protocole** : 5 runs V2-W (Conv + Double DQN, **sans LSTM**) ep=5000 GPU `--polyak-tau 0.005 --best-checkpoint-path checkpoints/v2u_w_polyak_best_seed{N}.pt`. Mêmes seeds 0-4 que V2-W baseline. **But** : isoler la contribution de Polyak seul (sans LSTM) pour répondre à la question scientifique "Polyak est-il le levier principal, ou est-ce le combo Polyak×LSTM ?".
 
-2. **Re-benchmark V2-W+Polyak n=5 same-seed** — consolidation transverse :
-   - Lancer 5 runs V2-W ep=5000 avec `--polyak-tau 0.005`
-   - Vérifier que Polyak stabilise aussi V2-W (Conv sans LSTM)
-   - Tester l'hypothèse : si V2-W+Polyak ≥ V2-ZY+Polyak, alors la LSTM apporte moins que Polyak attendu. Si V2-W+Polyak < V2-ZY+Polyak, alors LSTM + Polyak est la combinaison optimale.
+**Résultats par seed (eval rigoureux greedy strict)** :
 
-3. **Sous-projets V3+ déblocables** :
-   - **Mazes larges (max_size=15/20)** : test translation equivariance CNN — V2-U débloque le plafond, on peut maintenant tester du curriculum plus ambitieux
-   - **R2D2 burn-in** : améliorer encore LSTM (probablement moins prioritaire vu le gain V2-U)
-   - **Sous-projet B (mémoire persistante cross-session)** : la "vraie" prochaine étape du programme V2
-   - **Fix piège #10** : `max_attempts_bfs=500` ou cap `max_density=0.40` par défaut (les seeds V2-U performants peuvent atteindre diff=0.85 et crasher le générateur)
+| Seed | V2-W baseline | **V2-W+Polyak** | Δ | Final training | Pattern |
+|---|---|---|---|---|---|
+| 0 | 70 % | **80 %** | +10 pp | 2 % @ diff=0.30 | best ép 3199, collapse fin |
+| 1 | 70 % | 50 % | −20 pp | 0 % @ diff=0.10 | collapse total |
+| 2 | 60 % | 50 % | −10 pp | 10 % @ diff=0.45 | collapse |
+| 3 | 50 % | 60 % | +10 pp | 10 % @ diff=0.35 | best tardif ép 4099 |
+| 4 | 40 % | 60 % | +20 pp | 30 % @ diff=0.30 | best tardif ép 4199 |
+
+**Statistiques agrégées V2-W+Polyak vs V2-W baseline (n=5)** :
+
+| Métrique | V2-W baseline | **V2-W+Polyak** | Évolution |
+|---|---|---|---|
+| Mean best @ diff=0.30 | 58 % | **60 %** | **+2 pp (marginal)** |
+| Std inter-seed (n−1) | ~12 pp | **12.2 pp** | **= (identique)** |
+| Min | 40 % | 50 % | +10 pp |
+| Max | 70 % | 80 % | +10 pp |
+| Late-stage collapse | présent | **toujours présent** | = |
+
+**Verdict V2-W+Polyak** :
+
+> **Polyak n'apporte RIEN à V2-W.** Mean +2 pp est dans le bruit statistique. Std identique. Late-stage collapse persiste sur 5/5 seeds (training final 0-30 % alors que best capturé à 50-80 %). V2-W baseline était DÉJÀ stable (std ~12 pp) — son problème est le **plafond capacitaire**, pas l'instabilité.
+
+### V2-U — finding scientifique consolidé (V2-ZY+Polyak vs V2-W+Polyak)
+
+**Comparaison directe Polyak entre architectures** :
+
+| Métrique | V2-W+Polyak | V2-ZY+Polyak | Δ ZY-W |
+|---|---|---|---|
+| Mean best | 60 % | **92 %** | **+32 pp** |
+| Std | 12 pp | 13 pp | ≈ |
+| Min | 50 % | 70 % | +20 pp |
+| Max diff_max training | 0.45 | **0.85** | **+0.40** (énorme) |
+| Late-stage collapse | 5/5 seeds | 0/5 seeds | LSTM élimine le collapse |
+
+**Conclusion révisée — le finding "publishable"** :
+
+> Polyak n'est PAS le levier principal. C'est la **synergie LSTM × Polyak** qui débloque le régime supérieur. Lecture causale :
+>
+> - **V2-W (Conv + Double DQN)** : plafond capacitaire ferme (~60 % @ diff=0.30). Polyak n'aide pas car la baseline était déjà stable mais limitée. Late-stage collapse persiste.
+> - **V2-ZY (Conv + LSTM + Double DQN)** : potentiel maximal masqué par instabilité target. Polyak révèle ce potentiel (mean 92 %, std 13 pp, aucun collapse).
+>
+> **Hypothèse mécaniste** : LSTM agrège l'historique d'observations → représentation latente qui change LENTEMENT entre épisodes proches dans le curriculum. Polyak lisse la target ← cohérent avec représentation lente LSTM. Sans LSTM (V2-W), chaque obs est traitée indépendamment → target oscille avec les nouveaux mazes → Polyak n'a rien à lisser.
+
+**Implication architecturale** : pour des futurs sous-projets RL en curriculum dynamique, **LSTM + Polyak** est le combo recommandé. Polyak seul (sans mémoire temporelle) ou LSTM seule (sans soft target) n'atteignent pas le régime stable supérieur.
+
+**Prochaines étapes prioritaires (post V2-W+Polyak validé 2026-05-25)** :
+
+1. ✅ **V2-U Polyak soft target — LIVRÉ + VALIDÉ + ISOLÉ** (tag `v0.2.0-u`) :
+   - Code livré (`polyak_tau` opt-in dans 3 configs + 2 trainers + 3 agents + 3 CLI).
+   - V2-ZY+Polyak n=5 : mean 92 %, std 13 pp (vs 42 %, 39.6 pp baseline) — **3× réduction variance, +50 pp mean**.
+   - V2-W+Polyak n=5 : mean 60 %, std 12 pp (vs 58 %, 12 pp baseline) — **Polyak seul n'aide pas sans LSTM**.
+
+2. **Sous-projets V3+ déblocables** (V2 RL closed sur la branche capacité × stabilité) :
+   - **Mazes larges (max_size=15/20)** : tester si V2-ZY+Polyak tient à plus grande échelle (test translation equivariance CNN dans curriculum élargi). Probablement le **prochain test scientifique le plus informatif**.
+   - **R2D2 burn-in** : peut encore améliorer V2-ZY+Polyak (hidden state warm-up). Hypothèse : gain marginal vu la performance déjà à 92 %.
+   - **Fix piège #10** : `max_attempts_bfs=500` ou cap `max_density=0.40` par défaut (les seeds V2-U performants peuvent atteindre diff=0.85 et crasher le générateur — c'est arrivé sur V2-ZY+Polyak seed 1).
+   - **Sous-projet B (mémoire persistante cross-session)** : le "vrai" prochain pas du programme V2 auto-amélioration.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
