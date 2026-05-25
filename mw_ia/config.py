@@ -91,6 +91,9 @@ class ProceduralEnvConfig:
     min_size: int = 4                   # mode maze uniquement
     max_size: int = 20
     max_attempts_bfs: int = 100         # mode obstacles : tentatives avant RuntimeError
+    max_steps: int = 200                # truncation per épisode du GridWorld interne
+                                        # (normalisation d'horizon quand la grille scale :
+                                        #  10x10 → 200, 15x15 → 400, 20x20 → 600-800)
 
     def __post_init__(self) -> None:
         if self.mode not in ("obstacles", "maze"):
@@ -106,6 +109,8 @@ class ProceduralEnvConfig:
             )
         if self.max_attempts_bfs <= 0:
             raise ValueError(f"max_attempts_bfs doit être > 0, reçu {self.max_attempts_bfs}")
+        if self.max_steps <= 0:
+            raise ValueError(f"max_steps doit être > 0, reçu {self.max_steps}")
 
 
 @dataclass(frozen=True)

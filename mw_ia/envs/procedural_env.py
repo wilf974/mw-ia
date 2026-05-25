@@ -54,6 +54,7 @@ class ProceduralGridWorld:
             rows=rows, cols=cols,
             start=self.start, goal=goal,
             obstacles=obstacles,
+            max_steps=self.cfg.max_steps,
         )
         self._inner = GridWorld(gw_cfg)
         state, _ = self._inner.reset()

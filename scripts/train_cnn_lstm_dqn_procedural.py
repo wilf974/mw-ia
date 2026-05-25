@@ -26,6 +26,19 @@ def main() -> int:
     parser.add_argument("--mode", choices=("obstacles", "maze"), default="obstacles")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max-rows", type=int, default=10,
+                        help="Hauteur max de la grille procedurale (default 10).")
+    parser.add_argument("--max-cols", type=int, default=10,
+                        help="Largeur max de la grille procedurale (default 10).")
+    parser.add_argument("--max-steps", type=int, default=200,
+                        help="Truncation per epoisode du GridWorld interne (default 200). "
+                             "Normalisation d'horizon : 10x10 -> 200, 15x15 -> 400, "
+                             "20x20 -> 600-800. Eviter qu'une marche aleatoire 2D ne soit "
+                             "tronquee avant d'atteindre le goal sur grille plus large.")
+    parser.add_argument("--replay-capacity", type=int, default=5_000,
+                        help="Nombre de TRAJECTOIRES dans SequenceReplayBuffer "
+                             "(default 5000). Reduire a 2000-3000 pour mazes 15x15 "
+                             "afin de tenir la VRAM.")
     parser.add_argument("--conv-channels", type=int, nargs="+", default=[32, 64])
     parser.add_argument("--lstm-hidden", type=int, default=128)
     parser.add_argument("--sequence-length", type=int, default=32)
@@ -56,7 +69,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    proc_cfg = ProceduralEnvConfig(mode=args.mode)
+    proc_cfg = ProceduralEnvConfig(
+        mode=args.mode, max_rows=args.max_rows, max_cols=args.max_cols,
+        max_steps=args.max_steps,
+    )
     if args.mode == "obstacles":
         gen = RandomObstaclesGenerator(
             rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
@@ -74,6 +90,9 @@ def main() -> int:
         lstm_hidden=args.lstm_hidden,
         sequence_length=args.sequence_length,
         epsilon_decay_steps=args.epsilon_decay_steps,
+        replay_capacity=args.replay_capacity,
+        max_steps_per_episode=args.max_steps,
+        eval_max_steps=args.max_steps,
         double_dqn=args.double_dqn,
         eval_enabled=args.eval,
         eval_every_episodes=args.eval_every_episodes,
