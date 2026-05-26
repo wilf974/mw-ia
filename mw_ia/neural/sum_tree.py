@@ -70,18 +70,27 @@ class SumTree:
     def find(self, value: float) -> tuple[int, float]:
         """Trouve la feuille ou le cumul atteint `value`.
 
+        `value` est clampe a [0.0, total()] pour eviter de retourner un
+        leaf_idx dans la zone de padding (puissance de 2 superieure a capacity).
+        Si l'arbre est vide (total() == 0), retourne (0, 0.0).
+
         Retourne (leaf_idx in [0, capacity), priority de la feuille).
         """
+        # Clamp pour ne jamais descendre dans la zone padding (cas value >= total
+        # ou roundoff float aux bornes du stratified sampling caller-side).
+        value = max(0.0, min(value, float(self._tree[0])))
         # Descente depuis la racine
         idx = 0
         while idx < self._tree_capacity - 1:  # Tant que noeud interne
             left = 2 * idx + 1
-            right = 2 * idx + 2
             if value <= self._tree[left]:
                 idx = left
             else:
                 value -= self._tree[left]
-                idx = right
+                idx = 2 * idx + 2
         # idx est l'index dans le tableau, convertir en leaf_idx
         leaf_idx = idx - (self._tree_capacity - 1)
+        # Clamp defensif si arbre vide (toutes priorites a 0, leaf_idx peut
+        # tomber dans la zone padding via la branche "else")
+        leaf_idx = min(leaf_idx, self._capacity - 1)
         return leaf_idx, float(self._tree[idx])

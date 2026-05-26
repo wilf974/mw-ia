@@ -106,3 +106,23 @@ def test_capacity_5000_works() -> None:
     assert idx == 0
     idx, _ = tree.find(tree.total() - 0.5)
     assert idx == 4999
+
+
+def test_find_value_exceeds_total_returns_valid_leaf() -> None:
+    """value > total() retourne un leaf_idx dans [0, capacity), pas padding."""
+    tree = SumTree(5)
+    tree.update(0, 1.0)
+    tree.update(1, 1.0)
+    tree.update(2, 1.0)
+    # value=100.0 >> total=3.0
+    idx, _ = tree.find(100.0)
+    assert 0 <= idx < 5
+
+
+def test_find_empty_tree_returns_valid_leaf() -> None:
+    """Arbre avec toutes priorites a 0 (jamais update) ne retourne pas leaf padding."""
+    tree = SumTree(5)
+    # Aucun update : toutes les priorites sont 0
+    idx, prio = tree.find(0.0)
+    assert 0 <= idx < 5
+    assert prio == pytest.approx(0.0)
