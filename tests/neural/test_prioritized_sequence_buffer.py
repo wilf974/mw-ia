@@ -162,3 +162,29 @@ def test_capacity_5000_v2zy_default() -> None:
     prio_batch = buf.sample(batch_size=128, seq_len=32, beta=0.5)
     assert prio_batch.batch.states.shape == (32, 128, 300)
     assert prio_batch.weights.shape == (128,)
+
+
+# === Tests V2-B0 config field validation ===
+from mw_ia.config import DRQNConfig, ConvRecurrentDQNConfig
+
+
+def test_drqn_config_per_alpha_out_of_range_raises() -> None:
+    with pytest.raises(ValueError, match="per_alpha"):
+        DRQNConfig(per_alpha=-0.1)
+    with pytest.raises(ValueError, match="per_alpha"):
+        DRQNConfig(per_alpha=1.5)
+
+
+def test_drqn_config_per_epsilon_zero_raises() -> None:
+    with pytest.raises(ValueError, match="per_epsilon"):
+        DRQNConfig(per_epsilon=0.0)
+
+
+def test_conv_recurrent_config_per_beta_end_out_of_range_raises() -> None:
+    with pytest.raises(ValueError, match="per_beta_end"):
+        ConvRecurrentDQNConfig(per_beta_end=1.5)
+
+
+def test_conv_recurrent_config_per_eta_out_of_range_raises() -> None:
+    with pytest.raises(ValueError, match="per_eta"):
+        ConvRecurrentDQNConfig(per_eta=-0.1)

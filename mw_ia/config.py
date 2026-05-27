@@ -177,6 +177,14 @@ class DRQNConfig:
     use_amp: bool = True
     polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak (Lillicrap 2015).
 
+    # V2-B0 : Prioritized Experience Replay trajectory-level (Schaul 2015 + R2D2)
+    per_enabled: bool = False
+    per_alpha: float = 0.6              # priority exponent (Schaul 2015)
+    per_beta_start: float = 0.4         # IS exponent initial
+    per_beta_end: float = 1.0           # IS exponent final
+    per_eta: float = 0.9                # R2D2 aggregation : eta*max + (1-eta)*mean
+    per_epsilon: float = 1e-6           # small constant garantit priority > 0
+
     # Training
     episodes: int = 5_000
     max_steps_per_episode: int = 200
@@ -228,6 +236,20 @@ class DRQNConfig:
             raise ValueError(
                 f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
             )
+        if not (0.0 <= self.per_alpha <= 1.0):
+            raise ValueError(f"per_alpha doit etre dans [0, 1], recu {self.per_alpha}")
+        if not (0.0 <= self.per_beta_start <= 1.0):
+            raise ValueError(
+                f"per_beta_start doit etre dans [0, 1], recu {self.per_beta_start}"
+            )
+        if not (0.0 <= self.per_beta_end <= 1.0):
+            raise ValueError(
+                f"per_beta_end doit etre dans [0, 1], recu {self.per_beta_end}"
+            )
+        if not (0.0 <= self.per_eta <= 1.0):
+            raise ValueError(f"per_eta doit etre dans [0, 1], recu {self.per_eta}")
+        if self.per_epsilon <= 0.0:
+            raise ValueError(f"per_epsilon doit etre > 0, recu {self.per_epsilon}")
 
 
 @dataclass(frozen=True)
@@ -377,6 +399,14 @@ class ConvRecurrentDQNConfig:
     double_dqn: bool = True
     polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak.
 
+    # V2-B0 : Prioritized Experience Replay trajectory-level (Schaul 2015 + R2D2)
+    per_enabled: bool = False
+    per_alpha: float = 0.6
+    per_beta_start: float = 0.4
+    per_beta_end: float = 1.0
+    per_eta: float = 0.9
+    per_epsilon: float = 1e-6
+
     # V2-V : Training Protocol Stabilization (activé par défaut V2-ZY)
     eval_enabled: bool = True
     eval_every_episodes: int = 100
@@ -456,3 +486,17 @@ class ConvRecurrentDQNConfig:
             raise ValueError(
                 f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
             )
+        if not (0.0 <= self.per_alpha <= 1.0):
+            raise ValueError(f"per_alpha doit etre dans [0, 1], recu {self.per_alpha}")
+        if not (0.0 <= self.per_beta_start <= 1.0):
+            raise ValueError(
+                f"per_beta_start doit etre dans [0, 1], recu {self.per_beta_start}"
+            )
+        if not (0.0 <= self.per_beta_end <= 1.0):
+            raise ValueError(
+                f"per_beta_end doit etre dans [0, 1], recu {self.per_beta_end}"
+            )
+        if not (0.0 <= self.per_eta <= 1.0):
+            raise ValueError(f"per_eta doit etre dans [0, 1], recu {self.per_eta}")
+        if self.per_epsilon <= 0.0:
+            raise ValueError(f"per_epsilon doit etre > 0, recu {self.per_epsilon}")
