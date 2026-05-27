@@ -67,11 +67,35 @@ def main() -> int:
         help="V2-U : soft Polyak target update tau. Default 0.0 = hard sync. "
              "Recommande V2-ZY : 0.005 pour reduire variance inter-seed.",
     )
+    parser.add_argument(
+        "--per",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="V2-B0 : Prioritized Experience Replay trajectory-level (Schaul 2015 + R2D2). "
+             "Default False = SequenceReplayBuffer uniforme baseline V2-ZY.",
+    )
+    parser.add_argument("--per-alpha", type=float, default=0.6,
+                        help="V2-B0 : priority exponent alpha (default 0.6, Schaul 2015).")
+    parser.add_argument("--per-beta-start", type=float, default=0.4,
+                        help="V2-B0 : IS exponent beta initial (default 0.4, Schaul 2015).")
+    parser.add_argument("--per-beta-end", type=float, default=1.0,
+                        help="V2-B0 : IS exponent beta final (default 1.0, annealing complete).")
+    parser.add_argument("--per-eta", type=float, default=0.9,
+                        help="V2-B0 : R2D2 priority aggregation eta (default 0.9).")
+    parser.add_argument("--per-epsilon", type=float, default=1e-6,
+                        help="V2-B0 : small constant epsilon (default 1e-6) garantit priority > 0.")
+    parser.add_argument(
+        "--max-attempts-bfs",
+        type=int,
+        default=100,
+        help="ProceduralEnvConfig max_attempts_bfs (default 100). Recommande bench B0 : 500.",
+    )
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(
         mode=args.mode, max_rows=args.max_rows, max_cols=args.max_cols,
         max_steps=args.max_steps,
+        max_attempts_bfs=args.max_attempts_bfs,
     )
     if args.mode == "obstacles":
         gen = RandomObstaclesGenerator(
@@ -99,6 +123,12 @@ def main() -> int:
         eval_target_difficulty=args.eval_target_difficulty,
         best_checkpoint_path=args.best_checkpoint_path,
         polyak_tau=args.polyak_tau,
+        per_enabled=args.per,
+        per_alpha=args.per_alpha,
+        per_beta_start=args.per_beta_start,
+        per_beta_end=args.per_beta_end,
+        per_eta=args.per_eta,
+        per_epsilon=args.per_epsilon,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,
