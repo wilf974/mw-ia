@@ -12,6 +12,10 @@ import torch
 
 from mw_ia.agents.base import Agent
 from mw_ia.config import DRQNConfig
+from mw_ia.neural.prioritized_sequence_buffer import (
+    BetaScheduler,
+    PrioritizedSequenceReplayBuffer,
+)
 from mw_ia.neural.recurrent import RecurrentQNetwork
 from mw_ia.neural.recurrent_trainer import RecurrentDQNTrainer
 from mw_ia.neural.sequence_buffer import SequenceReplayBuffer
@@ -54,9 +58,22 @@ class RecurrentDQNAgent(Agent):
             device=str(self.device), use_amp=cfg.use_amp,
             polyak_tau=cfg.polyak_tau,
         )
-        self.buffer = SequenceReplayBuffer(
-            cfg.replay_capacity, obs_dim, cfg.max_steps_per_episode, seed=seed,
-        )
+        if cfg.per_enabled:
+            self.buffer: SequenceReplayBuffer | PrioritizedSequenceReplayBuffer = (
+                PrioritizedSequenceReplayBuffer(
+                    cfg.replay_capacity, obs_dim, cfg.max_steps_per_episode,
+                    alpha=cfg.per_alpha, epsilon=cfg.per_epsilon, seed=seed,
+                )
+            )
+            self._beta_scheduler: BetaScheduler | None = BetaScheduler(
+                cfg.per_beta_start, cfg.per_beta_end, cfg.episodes,
+            )
+        else:
+            self.buffer = SequenceReplayBuffer(
+                cfg.replay_capacity, obs_dim, cfg.max_steps_per_episode, seed=seed,
+            )
+            self._beta_scheduler = None
+        self._episode_count: int = 0
         self.global_step: int = 0
         self.target_syncs: int = 0
         self.last_loss: float | None = None
@@ -109,17 +126,39 @@ class RecurrentDQNAgent(Agent):
         """Push la trajectoire dans le buffer + train_steps_per_episode batches.
 
         Doit être appelé par le runner après la boucle step de l'épisode.
+        V2-B0 : branche PER (sample IS-weighted + update_priorities) si
+        cfg.per_enabled, sinon V2-Y baseline strict.
         """
         if self._episode_trajectory:
             self.buffer.push_trajectory(self._episode_trajectory)
+        self._episode_count += 1
         metrics: dict[str, float] = {"epsilon": self.epsilon}
         if len(self.buffer) >= max(self.cfg.min_episodes_to_learn, self.cfg.batch_size):
             losses: list[float] = []
-            for _ in range(self.cfg.train_steps_per_episode):
-                batch = self.buffer.sample(
-                    batch_size=self.cfg.batch_size, seq_len=self.cfg.sequence_length,
-                )
-                losses.append(self.trainer.step(batch))
+            if self.cfg.per_enabled:
+                assert self._beta_scheduler is not None
+                beta = self._beta_scheduler.beta(self._episode_count)
+                for _ in range(self.cfg.train_steps_per_episode):
+                    prio_batch = self.buffer.sample(  # type: ignore[union-attr]
+                        batch_size=self.cfg.batch_size,
+                        seq_len=self.cfg.sequence_length,
+                        beta=beta,
+                    )
+                    loss, td_errors = self.trainer.step_with_priorities(
+                        prio_batch.batch, prio_batch.weights, eta=self.cfg.per_eta,
+                    )
+                    self.buffer.update_priorities(  # type: ignore[union-attr]
+                        prio_batch.tree_indices, td_errors,
+                    )
+                    losses.append(loss)
+                metrics["per_beta"] = beta
+            else:
+                for _ in range(self.cfg.train_steps_per_episode):
+                    batch = self.buffer.sample(
+                        batch_size=self.cfg.batch_size,
+                        seq_len=self.cfg.sequence_length,
+                    )
+                    losses.append(self.trainer.step(batch))
             if losses:
                 self.last_loss = sum(losses) / len(losses)
                 metrics["loss"] = self.last_loss

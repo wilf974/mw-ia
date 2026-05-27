@@ -19,6 +19,10 @@ import torch
 from mw_ia.agents.base import Agent
 from mw_ia.config import ConvRecurrentDQNConfig
 from mw_ia.neural.conv_recurrent import ConvRecurrentQNetwork
+from mw_ia.neural.prioritized_sequence_buffer import (
+    BetaScheduler,
+    PrioritizedSequenceReplayBuffer,
+)
 from mw_ia.neural.recurrent_trainer import RecurrentDQNTrainer
 from mw_ia.neural.sequence_buffer import SequenceReplayBuffer
 
@@ -64,9 +68,22 @@ class ConvRecurrentDQNAgent(Agent):
             polyak_tau=cfg.polyak_tau,
         )
         obs_dim_flat = in_channels * rows * cols
-        self.buffer = SequenceReplayBuffer(
-            cfg.replay_capacity, obs_dim_flat, cfg.max_steps_per_episode, seed=seed,
-        )
+        if cfg.per_enabled:
+            self.buffer: SequenceReplayBuffer | PrioritizedSequenceReplayBuffer = (
+                PrioritizedSequenceReplayBuffer(
+                    cfg.replay_capacity, obs_dim_flat, cfg.max_steps_per_episode,
+                    alpha=cfg.per_alpha, epsilon=cfg.per_epsilon, seed=seed,
+                )
+            )
+            self._beta_scheduler: BetaScheduler | None = BetaScheduler(
+                cfg.per_beta_start, cfg.per_beta_end, cfg.episodes,
+            )
+        else:
+            self.buffer = SequenceReplayBuffer(
+                cfg.replay_capacity, obs_dim_flat, cfg.max_steps_per_episode, seed=seed,
+            )
+            self._beta_scheduler = None
+        self._episode_count: int = 0
         self.global_step: int = 0
         self.target_syncs: int = 0
         self.last_loss: float | None = None
@@ -121,18 +138,42 @@ class ConvRecurrentDQNAgent(Agent):
         return {"epsilon": self.epsilon}
 
     def end_episode(self) -> dict[str, float]:
-        """Push trajectoire dans buffer + train_steps_per_episode batches BPTT."""
+        """Push trajectoire dans buffer + train_steps_per_episode batches BPTT.
+
+        V2-B0 : branche PER (sample IS-weighted + update_priorities) si
+        cfg.per_enabled, sinon V2-ZY baseline strict.
+        """
         if self._episode_trajectory:
             self.buffer.push_trajectory(self._episode_trajectory)
+        self._episode_count += 1
         metrics: dict[str, float] = {"epsilon": self.epsilon}
         train_threshold = max(self.cfg.min_episodes_to_learn, self.cfg.batch_size)
         if len(self.buffer) >= train_threshold:
             losses: list[float] = []
-            for _ in range(self.cfg.train_steps_per_episode):
-                batch = self.buffer.sample(
-                    batch_size=self.cfg.batch_size, seq_len=self.cfg.sequence_length,
-                )
-                losses.append(self.trainer.step(batch))
+            if self.cfg.per_enabled:
+                assert self._beta_scheduler is not None
+                beta = self._beta_scheduler.beta(self._episode_count)
+                for _ in range(self.cfg.train_steps_per_episode):
+                    prio_batch = self.buffer.sample(  # type: ignore[union-attr]
+                        batch_size=self.cfg.batch_size,
+                        seq_len=self.cfg.sequence_length,
+                        beta=beta,
+                    )
+                    loss, td_errors = self.trainer.step_with_priorities(
+                        prio_batch.batch, prio_batch.weights, eta=self.cfg.per_eta,
+                    )
+                    self.buffer.update_priorities(  # type: ignore[union-attr]
+                        prio_batch.tree_indices, td_errors,
+                    )
+                    losses.append(loss)
+                metrics["per_beta"] = beta
+            else:
+                for _ in range(self.cfg.train_steps_per_episode):
+                    batch = self.buffer.sample(
+                        batch_size=self.cfg.batch_size,
+                        seq_len=self.cfg.sequence_length,
+                    )
+                    losses.append(self.trainer.step(batch))
             if losses:
                 self.last_loss = sum(losses) / len(losses)
                 metrics["loss"] = self.last_loss
