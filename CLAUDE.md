@@ -1331,12 +1331,109 @@ python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles
    - **R2D2 burn-in** : amélioration LSTM (probablement marginal vu 92 % @ 10×10 et 64 % @ 15×15).
    - **Fix piège #10** : `max_attempts_bfs=500` ou cap `max_density=0.40` (seed 1 10×10 V2-ZY+Polyak avait crashé à diff=0.85).
 
+### V2-B0 — état final des phases (livraison code 2026-05-27, bench GPU pending)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Scaffold 5 test files | T1 | ✅ | 0 | 1 |
+| 2 — SumTree (8 + 2 fix) | T2 | ✅ | 10 | 2 |
+| 3 — BetaScheduler | T3 | ✅ | 7 | 1 |
+| 4 — PrioritizedSequenceReplayBuffer | T4 | ✅ | 13 | 1 |
+| 5 — Config extension (DRQN + ConvRecurrent) | T5 | ✅ | 4 | 1 |
+| 6 — Trainer.step_with_priorities | T6 | ✅ | 8 | 1 |
+| 7 — Agents V2-Y + V2-ZY integration | T7 | ✅ | 16 (parametrized) | 1 |
+| 8 — CLI flags × 2 scripts | T8 | ✅ | 0 | 1 |
+| 9 — CI smoke (PER + PER+Polyak) | T9 | ✅ | 0 | 1 |
+| 10 — Sanity verification | T10 | ✅ | 0 | 0 |
+| 11 — Doc README + CLAUDE.md | T11 | ✅ | 0 | 1 |
+| 12 — Bench n=5 10×10 GPU | T12 | ⏳ pending | 0 | TBD |
+| 13 — Bench n=5 15×15 GPU | T13 | ⏳ pending | 0 | TBD |
+| 14 — Tag `v0.2.0-b0` | T14 | ⏳ après bench | — | tag |
+
+### Composants V2-B0 livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `SumTree` | `mw_ia/neural/sum_tree.py` | Arbre binaire O(log N) sample/update. Padding interne pow2 (capacity quelconque). `find()` clampe value + leaf_idx défensivement. |
+| `BetaScheduler` | `mw_ia/neural/prioritized_sequence_buffer.py` | Annealing linéaire β_start → β_end pour IS correction. |
+| `PrioritizedBatchSeq` | idem | Dataclass : `batch: BatchSeq` (V2-Y) + `weights: ndarray(B,) float32` + `tree_indices: ndarray(B,) int64`. |
+| `PrioritizedSequenceReplayBuffer` | idem | Buffer PER trajectory-level. Sampling stratifié (segments égaux sur sum tree). IS weights normalisés par `max(w)`. Priority stockée `(|td|+ε)^α`. `_max_priority` greedy-init monotone. |
+| `RecurrentDQNTrainer._step_impl` + `step_with_priorities` | `mw_ia/neural/recurrent_trainer.py` | Refactor unifié : `step()` V2-Y compat strict + `step_with_priorities(batch, weights, eta)` retourne `(loss, td_errors_aggregées)` via R2D2 `η × max + (1−η) × mean` hors autocast. |
+| Branche PER `RecurrentDQNAgent` (V2-Y) | `mw_ia/agents/recurrent_dqn.py` | Constructor : conditional `PrioritizedSequenceReplayBuffer` + `BetaScheduler` ou V2-Y baseline. `end_episode()` : `_episode_count` incrémenté toujours, branche PER appelle `step_with_priorities` + `update_priorities`, émet `metrics["per_beta"]`. |
+| Branche PER `ConvRecurrentDQNAgent` (V2-ZY) | `mw_ia/agents/conv_recurrent_dqn.py` | Pattern parallèle (obs_dim = `in_channels × rows × cols`). |
+| 6 champs config × 2 dataclasses | `mw_ia/config.py` | `per_enabled: bool = False`, `per_alpha: float = 0.6`, `per_beta_start: float = 0.4`, `per_beta_end: float = 1.0`, `per_eta: float = 0.9`, `per_epsilon: float = 1e-6`. Validation in `__post_init__`. |
+| 7 flags CLI × 2 scripts | `scripts/train_drqn_procedural.py`, `scripts/train_cnn_lstm_dqn_procedural.py` | `--per` (`BooleanOptionalAction` default False), 5 hyperparams (`--per-alpha`, `--per-beta-start`, `--per-beta-end`, `--per-eta`, `--per-epsilon`), `--max-attempts-bfs` (default 100, recommandé bench 500). |
+| 2 smoke CI | `.github/workflows/aether_verify.yml` | `--per` seul + `--per --polyak-tau 0.005` cohabit sur 10 ép CPU. |
+
+### Décisions techniques V2-B0
+
+- **SumTree padding interne pow2** : convention "lopsided" du plan initial s'est révélée incorrecte pour `find()` ordering sur capacity non-pow2 (e.g. `capacity=5000`, `find(0.5) != 0`). Padding standard OpenAI baselines / Stable-Baselines3. User-facing `capacity` inchangé.
+- **`find()` clampe défensivement** : `value ∈ [0, total()]` puis `leaf_idx ∈ [0, capacity-1]`. Protège contre roundoff stratified sampling (segment upper bound atteint) ET empty buffer (toutes priorities = 0).
+- **IS weights normalisation par max(w)** : `w_i = (1/(N·P_i))^β` puis `w_i / max(w_j)`. Prévient gradients explosifs sur trajectoires rares. Numérateur uniquement (denominator reste `mask.sum()`).
+- **R2D2 aggregation hors autocast** : `with torch.no_grad():` block, `(target_q - q_pred).detach().abs()`, cast explicite `np.float32` pour retour.
+- **`_episode_count` indépendant de `len(buffer)`** : β annealing strict sur `cfg.episodes`. Le buffer plafonne à `capacity` mais episode_count continue à croître (vérifié par test `test_episode_count_increments_independently_of_buffer_len`).
+- **`per_enabled=False` default strict** : V2-Y / V2-ZY / V2-W / V2-U baselines reproductibles sans modification. Strict opt-in via CLI `--per`.
+- **Polyak (V2-U) + PER (V2-B0) orthogonaux** : target update post-backward (Polyak) cohabite naturellement avec PER. Verified par `test_polyak_with_per` et `test_polyak_and_per_cohabit`.
+- **ASCII error messages** : cohérent piège #8 Windows cp1252 (pattern V2-U). Help-text CLI utilise "alpha", "beta", "epsilon" en mots.
+
+### V2-B0 — pièges connus
+
+1. **SumTree convention pow2 padding** : si capacity non-pow2, le tableau interne fait `2 × _tree_capacity - 1` (e.g. 16383 floats pour capacity=5000 → ~131 KB, négligeable). Ne PAS supposer `_tree_capacity == capacity` dans du code externe.
+2. **`find(value >= total)`** : retournait leaf_idx hors range avant le fix Task 2 (commit `dbbdea3`). Maintenant clampé. Si quelqu'un réécrit `find()`, garder le clamp.
+3. **Stratified sampling segment upper bound** : `numpy uniform(low, high)` est `[low, high)` donc le segment `b=B-1` peut tirer `value` proche de `total`. Le clamp de `find()` est nécessaire ici.
+4. **IS weights précision AMP** : weights sont float32 et passés au trainer. Sous autocast CUDA fp16, la multiplication `elem_loss × mask × w` reste correcte. Ne PAS passer weights en float64 (bypass autocast inutile).
+5. **TD-errors détachés avant aggregation** : `.detach().abs()` strict, sinon fuite gradient → memory leak progressif (~50 calls → OOM petit GPU). Test `test_step_with_priorities_no_grad_through_priorities` couvre.
+6. **`update_priorities` sur `tree_indices` stale** : si quelqu'un push une nouvelle trajectoire entre sample et update, le slot a été overwritten. Le contrat est "sample → step → update atomique au sein d'un train_step" — respecté par les agents V2-B0.
+7. **`per_enabled=False` → `_beta_scheduler is None`** : le code agent assert sur ça avant d'appeler `beta()`. Si on refactore, garder l'invariant.
+8. **`max_attempts_bfs=100` par défaut** : sur 10×10 + scheduler poussant à `density ≥ 0.43`, possible crash `RandomObstaclesGenerator` (cf. piège #10 V2-X). Bench V2-B0 recommande `--max-attempts-bfs 500` pour seeds qui montent vite (ex. V2-ZY+Polyak seed 1 V2-U).
+
+### V2-B0 — bench protocol (Tasks 12-13, pending GPU)
+
+Pattern V2-U reproduit strict :
+- n=5 same-seed (seeds 0-4)
+- Eval rigoureux V2-V (best @ diff=0.30 fixe greedy, 10 seeds held-out 10000-10009)
+- Variable unique changée : `--per`
+
+**Phase 1 — 10×10 sanity (no-regression)** :
+```bash
+for seed in 0 1 2 3 4; do
+  python scripts/train_cnn_lstm_dqn_procedural.py \
+    --episodes 5000 --mode obstacles --device cuda --seed $seed \
+    --polyak-tau 0.005 --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b0_10x10_seed${seed}.pt
+done
+```
+**Critères** : mean ≥ 85 %, std ≤ 20 pp, 0/5 collapse, diff_max ≥ 0.5. Compute ~2.5 h GPU.
+
+**Phase 2 — 15×15 test scientifique** :
+```bash
+for seed in 0 1 2 3 4; do
+  python scripts/train_cnn_lstm_dqn_procedural.py \
+    --episodes 5000 --mode obstacles --device cuda --seed $seed \
+    --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b0_15x15_seed${seed}.pt
+done
+```
+**Critères** (≥ 1/4 atteint pour valider "PER aide") :
+- Mean > 64 % (baseline V2-ZY+Polyak 15×15)
+- Min > 50 %
+- Médiane `ep_to_best` < baseline médiane (convergence accélérée)
+- Diff_max training > 0.36
+
+Compute ~3.75 h GPU.
+
+**Décision post-bench** :
+- 0/4 critères → `v0.2.0-b0` posé avec finding négatif documenté, brainstorm B1
+- 1-2/4 → `v0.2.0-b0` + brainstorm B1
+- ≥ 3/4 → cascade Conv + LSTM + Double DQN + Polyak + PER confirmée, finding publishable
+
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 265 passed. + `bash aether/verify_all.sh` → 8 OK.
+   Attendu : 323 passed (incluant V2-B0 code livré, bench GPU pending). + `bash aether/verify_all.sh` → 8 OK.
 3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes

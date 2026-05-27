@@ -425,6 +425,57 @@ python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles
 
 Variance inter-seed best @ diff=0.30 sur V2-ZY+Polyak n=5 **< 20 pp** (vs 38 pp baseline V2-ZY).
 
+## V2-B0 — Trajectory-level Prioritized Experience Replay (code livré, bench pending)
+
+**Tests** : 323 verts (265 baseline + 58 V2-B0). **Tag** : `v0.2.0-b0` prévu après bench n=5.
+
+Sous-projet B phase 0 : Prioritized Experience Replay (Schaul 2015 + R2D2 2019) trajectoire-level sur `SequenceReplayBuffer` V2-Y. Contrôle scientifique avant B1 (policy snapshot rehearsal) et B2 (episodic memory).
+
+### Hypothèse
+
+Le replay uniforme est-il un bottleneck du régime stable V2-ZY+Polyak (mean 92 % @ 10×10, 64 % @ 15×15) ? PER trajectoire-level avec priorité = `(|td| + ε)^α`, IS correction annealée `β: 0.4 → 1.0`, aggregation R2D2 `η × max + (1−η) × mean` par trajectoire.
+
+### Usage CLI (opt-in via `--per`)
+
+```bash
+# V2-ZY + Polyak + PER 10x10 (sanity / no-regression)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --polyak-tau 0.005 --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b0_10x10_seed0.pt
+
+# V2-ZY + Polyak + PER 15x15 (test scientifique principal)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b0_15x15_seed0.pt
+
+# Baseline V2-ZY+Polyak (sans PER) : ne pas passer --per
+```
+
+### Hyperparams V2-B0 (défauts littéraires)
+
+| Flag CLI | Default | Source |
+|---|---|---|
+| `--per-alpha` | 0.6 | Schaul et al. 2015 |
+| `--per-beta-start` | 0.4 | Schaul et al. 2015 |
+| `--per-beta-end` | 1.0 | Annealing complet |
+| `--per-eta` | 0.9 | Kapturowski et al. 2019 (R2D2) |
+| `--per-epsilon` | 1e-6 | Priority floor |
+| `--max-attempts-bfs` | 100 (recommandé bench : **500**) | Pre-mitigation piège #10 V2-X |
+
+### Architecture
+
+- `SumTree` O(log N) avec padding interne pow2 — `mw_ia/neural/sum_tree.py`
+- `PrioritizedSequenceReplayBuffer` (sampling stratifié + IS normalisé par max) + `BetaScheduler` — `mw_ia/neural/prioritized_sequence_buffer.py`
+- `RecurrentDQNTrainer.step_with_priorities` (IS-weighted loss + R2D2 priority aggregation hors autocast)
+- Branche conditionnelle dans `RecurrentDQNAgent` (V2-Y) et `ConvRecurrentDQNAgent` (V2-ZY) : `cfg.per_enabled` default `False` → backwards compat strict.
+
+### Critère succès (bench n=5 same-seed pattern V2-U)
+
+**10×10 — no-regression** : mean ≥ 85 %, std ≤ 20 pp, 0/5 collapse, diff_max ≥ 0.5.
+
+**15×15 — test scientifique** : au moins 1 critère parmi {mean > 64 %, min > 50 %, médiane ep_to_best < baseline médiane, diff_max > 0.36}.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
