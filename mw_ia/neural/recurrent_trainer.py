@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -61,6 +62,36 @@ class RecurrentDQNTrainer:
                 p_target.data.mul_(1.0 - tau).add_(p_online.data, alpha=tau)
 
     def step(self, batch: BatchSeq) -> float:
+        """V2-Y baseline : sans IS, retourne loss seul (signature stricte)."""
+        loss, _ = self._step_impl(batch, weights=None, eta=0.0)
+        return loss
+
+    def step_with_priorities(
+        self,
+        batch: BatchSeq,
+        weights: np.ndarray,
+        eta: float = 0.9,
+    ) -> tuple[float, np.ndarray]:
+        """V2-B0 : sample IS-weighted + retourne (loss, td_errors agréges R2D2).
+
+        Voir spec V2-B0 : docs/superpowers/specs/2026-05-26-mw-ia-per-trajectory.md
+        """
+        loss, td_errors = self._step_impl(batch, weights=weights, eta=eta)
+        assert td_errors is not None
+        return loss, td_errors
+
+    def _step_impl(
+        self,
+        batch: BatchSeq,
+        weights: np.ndarray | None = None,
+        eta: float = 0.9,
+    ) -> tuple[float, np.ndarray | None]:
+        """Pipeline unifié BPTT.
+
+        weights=None → V2-Y baseline strict (loss masquée uniforme, td_errors=None).
+        weights fourni → IS-weighted loss + retourne td_errors agrégés par trajectoire
+        selon la formule R2D2 : priority_b = eta × max + (1 − eta) × mean.
+        """
         states = torch.from_numpy(batch.states).to(self.device, non_blocking=True)
         actions = torch.from_numpy(batch.actions).to(self.device, non_blocking=True)
         rewards = torch.from_numpy(batch.rewards).to(self.device, non_blocking=True)
@@ -90,12 +121,19 @@ class RecurrentDQNTrainer:
                     q_next = q_next_all.max(dim=-1).values
                 target_q = rewards + self.gamma * q_next * (1.0 - dones)
 
-            # Huber loss element-wise, puis mask, puis moyenne sur vrais steps
+            # Huber loss element-wise, puis mask + (optionnel) IS weights
             elem_loss = self.loss_fn(q_pred, target_q)
-            masked_loss = elem_loss * mask
+            if weights is None:
+                masked_loss = elem_loss * mask
+            else:
+                w = torch.from_numpy(weights).to(
+                    self.device, non_blocking=True
+                ).unsqueeze(0)  # (1, batch) broadcast vers (seq, batch)
+                masked_loss = elem_loss * mask * w
             n_valid = mask.sum().clamp(min=1.0)
             loss = masked_loss.sum() / n_valid
 
+        # Backward + grad clip + optimizer step (V2-Y inchangé)
         self.optimizer.zero_grad(set_to_none=True)
         if self.use_amp:
             self._scaler.scale(loss).backward()
@@ -112,4 +150,19 @@ class RecurrentDQNTrainer:
         if self.polyak_tau > 0.0:
             self.polyak_update(self.polyak_tau)
 
-        return float(loss.detach().item())
+        loss_value = float(loss.detach().item())
+
+        # V2-B0 : aggregation R2D2 si PER
+        if weights is None:
+            return loss_value, None
+
+        with torch.no_grad():
+            td_step = (target_q - q_pred).detach().abs()        # (seq, batch)
+            masked_td = td_step * mask                          # (seq, batch)
+            max_per_traj = masked_td.max(dim=0).values          # (batch,)
+            sum_per_traj = masked_td.sum(dim=0)                 # (batch,)
+            length_per_traj = mask.sum(dim=0).clamp(min=1.0)    # (batch,)
+            mean_per_traj = sum_per_traj / length_per_traj
+            priorities = eta * max_per_traj + (1.0 - eta) * mean_per_traj
+
+        return loss_value, priorities.cpu().numpy().astype(np.float32)
