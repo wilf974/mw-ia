@@ -64,6 +64,22 @@ jobs:
             --per --polyak-tau 0.005 --eval-every-episodes 5 \
             --best-checkpoint-path checkpoints/ci_v2b0_polyak_best.pt
           test -f checkpoints/ci_v2b0_polyak_best.pt
+      - name: Smoke test V2-B1a Policy Snapshot Rehearsal on V2-ZY
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py \
+            --episodes 10 --mode obstacles --device cpu \
+            --b1a --eval-every-episodes 5 \
+            --best-checkpoint-path checkpoints/ci_v2b1a_best.pt
+          test -f checkpoints/ci_v2b1a_best.pt
+      - name: Smoke test V2-B1a + Polyak cohabit (sanity check)
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py \
+            --episodes 10 --mode obstacles --device cpu \
+            --b1a --polyak-tau 0.005 --eval-every-episodes 5 \
+            --best-checkpoint-path checkpoints/ci_v2b1a_polyak_best.pt
+          test -f checkpoints/ci_v2b1a_polyak_best.pt
 
   aether-files:
     runs-on: ubuntu-latest
