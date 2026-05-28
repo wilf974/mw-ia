@@ -64,6 +64,20 @@ def main() -> int:
         default=100,
         help="ProceduralEnvConfig max_attempts_bfs (default 100). Recommande bench B0 : 500.",
     )
+    parser.add_argument(
+        "--b1a",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="V2-B1a : Policy Snapshot Rehearsal - capture des trajectoires successful "
+             "depuis le buffer au moment du best eval (V2-V), inject 20%% dans chaque batch. "
+             "Default False = pas de rehearsal (V2-U / V2-B0 baseline).",
+    )
+    parser.add_argument("--b1a-snapshot-size", type=int, default=50,
+                        help="V2-B1a : nb de trajectoires capturees par best (default 50).")
+    parser.add_argument("--b1a-n-windows", type=int, default=3,
+                        help="V2-B1a : sliding window des N derniers bests (default 3).")
+    parser.add_argument("--b1a-mix-ratio", type=float, default=0.2,
+                        help="V2-B1a : fraction du batch venant du snapshot (default 0.2 = 20%%).")
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode, max_attempts_bfs=args.max_attempts_bfs)
@@ -91,6 +105,10 @@ def main() -> int:
         per_beta_end=args.per_beta_end,
         per_eta=args.per_eta,
         per_epsilon=args.per_epsilon,
+        b1a_enabled=args.b1a,
+        b1a_snapshot_size=args.b1a_snapshot_size,
+        b1a_n_windows=args.b1a_n_windows,
+        b1a_mix_ratio=args.b1a_mix_ratio,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,
