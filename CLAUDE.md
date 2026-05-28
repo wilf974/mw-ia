@@ -1551,12 +1551,100 @@ Ce finding est **plus utile négativement que positivement** : PER seul n'est pa
 
 **Décision** : `v0.2.0-b0` posé avec finding négatif honnête. Le tag documente que PER 10×10 est une amélioration solide, PER 15×15 n'est pas. Prochaine étape brainstorm B1 (priorité maintenue), pas B0.1 (variante PER) qui nécessiterait un nouveau cycle complet.
 
+### V2-B1a — état final des phases (code livré 2026-05-29, bench GPU pending)
+
+| Phase | Tâches | Statut | Tests | Commits |
+|---|---|---|---|---|
+| 1 — Scaffold 2 test files | T1 | ✅ | 0 | 1 |
+| 2 — `concat_batchseq` helper + 3 tests | T2 | ✅ | 3 | 1 |
+| 3 — `SnapshotTrajectoryStore` + 12 tests (invariant central) | T3 | ✅ | 12 | 1 |
+| 4 — Config extension (DRQN + ConvRecurrent) + 4 tests | T4 | ✅ | 4 | 1 |
+| 5 — Agents V2-Y + V2-ZY integration + 14 parametrized | T5 | ✅ | 14 | 1 |
+| 6 — Runner hook `on_new_best()` (V2-ZY uniquement) | T6 | ✅ | 0 | 1 |
+| 7 — CLI flags × 2 scripts | T7 | ✅ | 0 | 1 |
+| 8 — CI smoke V2-B1a (B1a seul + B1a+Polyak cohabit) | T8 | ✅ | 0 | 1 |
+| 9 — Sanity verification end-to-end | T9 | ✅ | 0 | 0 |
+| 10 — Doc README + CLAUDE.md | T10 | ✅ | 0 | 1 |
+| 11 — Bench Bras 3 (B1a seul) 15×15 GPU n=5 ~5-6h | T11 | ⏳ pending | 0 | TBD |
+| 12 — Bench Bras 4 (B1a+PER) 15×15 GPU n=5 + factoriel 2×2 ~5-6h | T12 | ⏳ pending | 0 | TBD |
+| 13 — Tag `v0.2.0-b1a` + finding consolidé | T13 | ⏳ après bench | — | tag |
+
+### Composants V2-B1a livrés
+
+| Composant | Fichier | Rôle |
+|---|---|---|
+| `SnapshotTrajectoryStore` | `mw_ia/training/snapshot_store.py` | Sliding window FIFO de N captures × snapshot_size trajectoires. Pré-allocation numpy, slice assignment (pas de view → immutability structurelle). Filtre succès strict `terminated AND total_reward > 0`. |
+| `concat_batchseq(a, b)` | `mw_ia/neural/sequence_buffer.py` | Helper sample-time mix : concatène 2 BatchSeq (axe batch). Padding longueur max + masks réalignés. |
+| 4 champs config × 2 dataclasses | `mw_ia/config.py` | `b1a_enabled: bool = False`, `b1a_snapshot_size: int = 50`, `b1a_n_windows: int = 3`, `b1a_mix_ratio: float = 0.2`. Validation `__post_init__`. |
+| Branche B1a `RecurrentDQNAgent` (V2-Y) | `mw_ia/agents/recurrent_dqn.py` | Constructor : conditional `SnapshotTrajectoryStore`. `on_new_best()` capture from buffer. `_sample_training_batch()` gère 4 combinaisons PER × B1a. **API exposée mais sans hook runner V2-Y** (asymétrie MVP). |
+| Branche B1a `ConvRecurrentDQNAgent` (V2-ZY) | `mw_ia/agents/conv_recurrent_dqn.py` | Pattern parallèle. Hook runner activé (Task 6). |
+| Hook runner `on_new_best()` | `mw_ia/training/runner.py` (`ConvRecurrentProceduralDQNRunner`) | Appelé après `best_tracker.update()` retourne True. **V2-Y runner asymmetry by-design** (bench cible exclusif V2-ZY). |
+| CLI flags × 2 scripts | `scripts/train_drqn_procedural.py`, `scripts/train_cnn_lstm_dqn_procedural.py` | `--b1a / --no-b1a` (BooleanOptionalAction default False) + 3 hyperparams. Help-text ASCII (piège #8). |
+| 2 smoke CI | `.github/workflows/aether_verify.yml` | `--b1a` seul + `--b1a --polyak-tau 0.005` cohabit sur 10 ép CPU V2-ZY. |
+
+### Décisions techniques V2-B1a
+
+- **Immutability structurelle** (pas conventionnelle) : `SnapshotTrajectoryStore.capture_from()` fait `self._states[dest_slot, :length] = source_buffer._states[slot_idx, :length]` (slice assignment numpy = element-wise copy). Modification ultérieure du buffer source ne propage pas au store. Invariant central testé par `test_immutability_after_capture`.
+- **Tight coupling V2-Y buffer ↔ V2-B1a store** : `snapshot_store` accède aux attributs privés `_states`, `_actions`, `_rewards`, `_dones`, `_seq_lens` du `SequenceReplayBuffer`. Intentional per spec section 5.1. Si V2-Y buffer change ses internals, snapshot_store cassera silencieusement. À surveiller pour futures évolutions buffer.
+- **Asymétrie V2-Y / V2-ZY runner hook** : spec line 1341 documente "V2-Y runner asymmetry". V2-Y agent expose `on_new_best()` mais runner V2-Y (`RecurrentProceduralDQNRunner`) ne l'appelle pas. Bench MVP cible exclusivement V2-ZY (régime stable à 15×15 baseline V2-U).
+- **`b1a_enabled=False` default strict** : V2-U / V2-B0 baselines reproductibles sans modification. Strict opt-in via CLI `--b1a`.
+- **4 combinaisons B1a × PER orthogonales** : `_sample_training_batch()` agent-side gère (B1a=F, PER=F), (B1a=T, PER=F), (B1a=F, PER=T), (B1a=T, PER=T). PER pèse les samples principal, B1a injecte 20 % sample uniforme non-pondéré du snapshot store.
+- **Polyak (V2-U) + B1a (V2-B1a) orthogonaux** : target update post-backward (Polyak) cohabite naturellement avec snapshot rehearsal sample-time (B1a). Smoke CI valide la cohabitation.
+- **ASCII error messages + help-text** : cohérent piège #8 Windows cp1252.
+
+### V2-B1a — pièges connus
+
+1. **Tight coupling buffer↔store privé** : si quelqu'un refactore `SequenceReplayBuffer` (renomme `_states`, change layout shape, etc.), `SnapshotTrajectoryStore` cassera silencieusement. Couvert par test `test_capture_from_buffer` mais à surveiller manuellement.
+2. **Asymétrie hook V2-Y / V2-ZY** : `agent.on_new_best()` existe sur V2-Y agent mais n'est appelée nulle part dans le runner V2-Y. Smoke `python train_drqn_procedural.py --b1a` ne loggue PAS "B1a snapshot capture". Comportement attendu, pas un bug.
+3. **`snapshot_size > len(buffer.successful_trajectories)` au moment du best** : `capture_from()` capture toutes les trajectoires successful disponibles (peut être < snapshot_size). Pas d'erreur, juste capture partielle. Log indique `n_captured`.
+4. **Sliding window FIFO** : 4ᵉ capture évince la 1ʳᵉ (`_n_windows=3` default). Pas de cumul illimité.
+5. **`b1a_mix_ratio ∈ ]0, 1[` strict** : 0.0 ou 1.0 invalide (validation `__post_init__`). Si quelqu'un veut "tout principal" il doit faire `--no-b1a`, pas `--b1a-mix-ratio 0`.
+6. **`max_attempts_bfs=100` par défaut** : même piège que V2-B0 (cf. piège #10 V2-X). Bench V2-B1a recommande `--max-attempts-bfs 500`.
+
+### V2-B1a — bench protocol (Tasks 11-12, pending GPU)
+
+Pattern V2-B0 reproduit strict + factoriel 2×2 (B1a × PER) :
+- n=5 same-seed (seeds 0-4) par bras
+- Eval rigoureux V2-V (best @ diff=0.30 fixe greedy, 10 seeds held-out 10000-10009)
+
+**Bras 3 — B1a seul à 15×15 (test scientifique principal)** :
+```bash
+for seed in 0 1 2 3 4; do
+  python scripts/train_cnn_lstm_dqn_procedural.py \
+    --episodes 5000 --mode obstacles --device cuda --seed $seed \
+    --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --b1a --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b1a_bras3_seed${seed}.pt
+done
+```
+
+**Bras 4 — B1a + PER à 15×15 (factoriel 2×2)** :
+```bash
+for seed in 0 1 2 3 4; do
+  python scripts/train_cnn_lstm_dqn_procedural.py \
+    --episodes 5000 --mode obstacles --device cuda --seed $seed \
+    --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --b1a --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b1a_bras4_seed${seed}.pt
+done
+```
+
+**Critères acceptance Bras 3 (≥ 1/4 pour valider "B1a aide")** :
+- Mean > 64 % (baseline V2-ZY+Polyak 15×15)
+- Min > 50 %
+- Médiane `ep_to_best` < baseline médiane
+- Diff_max training > 0.36
+
+**Synthèse factorielle 2×2** : décide si l'interaction B1a × PER renverse la pathologie scaling PER (B1a + PER > B1a > baseline), ou si B1a seul suffit, ou si les deux échouent.
+
+Compute attendu : ~10-12h GPU RTX 3060 total.
+
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 323 passed (incluant V2-B0 code livré, bench GPU pending). + `bash aether/verify_all.sh` → 8 OK.
+   Attendu : 356 passed (incluant V2-B0 + V2-B1a code livré, bench GPU pending). + `bash aether/verify_all.sh` → 8 OK.
 3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
@@ -1567,9 +1655,9 @@ Ce finding est **plus utile négativement que positivement** : PER seul n'est pa
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy`, `v0.2.0-u` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 265 passed)
-- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`, `mw_ia/neural/conv_recurrent.py`, `mw_ia/agents/conv_recurrent_dqn.py`) sans raison documentée
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy`, `v0.2.0-u`, `v0.2.0-b0` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 356 passed)
+- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`, `mw_ia/neural/conv_recurrent.py`, `mw_ia/agents/conv_recurrent_dqn.py`, `mw_ia/neural/sum_tree.py`, `mw_ia/neural/prioritized_sequence_buffer.py`, `mw_ia/training/snapshot_store.py`) sans raison documentée
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)
 

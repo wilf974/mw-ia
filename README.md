@@ -476,6 +476,56 @@ python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles
 
 **15×15 — test scientifique** : au moins 1 critère parmi {mean > 64 %, min > 50 %, médiane ep_to_best < baseline médiane, diff_max > 0.36}.
 
+## V2-B1a — Policy Snapshot Rehearsal (code livré, bench pending)
+
+**Tests** : 356 verts (323 baseline + 33 V2-B1a). **Tag** : `v0.2.0-b1a` prévu après bench n=5.
+
+Sous-projet B phase 1a : Policy Snapshot Rehearsal sur `SequenceReplayBuffer` V2-Y / V2-ZY. Lecture causale du finding V2-B0 phase-dependence : PER trajectoire-level aide à 10×10 (+6 pp) mais dégrade à 15×15 (−18 pp). Hypothèse B1a alternative : préserver les trajectoires near-frontier capturées au moment du best eval V2-V — sliding window FIFO de N captures × snapshot_size trajectoires immutable — suffit-il à éviter forgetting et améliorer V2-ZY+Polyak 15×15 sans la pathologie scaling de PER ?
+
+### Hypothèse
+
+Quand `BestCheckpointTracker.update()` retourne True (nouveau best eval V2-V), capturer K trajectoires successful (`terminated AND total_reward > 0`) du buffer dans un `SnapshotTrajectoryStore` immutable. À chaque `end_episode()`, mixer 80 % batch principal + 20 % snapshot sample uniforme. Filtre succès strict garantit que rehearsal pousse vers comportements gagnants. Sliding window FIFO préserve diversité curriculum (3 derniers bests).
+
+### Usage CLI (opt-in via `--b1a`)
+
+```bash
+# V2-ZY + Polyak + B1a 15x15 (Bras 3 — test scientifique principal)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --b1a --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b1a_15x15_seed0.pt
+
+# V2-ZY + Polyak + B1a + PER 15x15 (Bras 4 — factoriel 2x2)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --b1a --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b1a_per_15x15_seed0.pt
+
+# Baseline V2-ZY+Polyak (sans B1a) : ne pas passer --b1a
+```
+
+### Hyperparams V2-B1a (défauts spec)
+
+| Flag CLI | Default | Source |
+|---|---|---|
+| `--b1a-snapshot-size` | 50 | Spec section 4.2 (size capture) |
+| `--b1a-n-windows` | 3 | Sliding window FIFO 3 derniers bests |
+| `--b1a-mix-ratio` | 0.2 | 80/20 mix sample-time |
+
+### Architecture
+
+- `SnapshotTrajectoryStore` (sliding window FIFO immutable, pré-allocation numpy) — `mw_ia/training/snapshot_store.py`
+- `concat_batchseq` helper sample-time mix — `mw_ia/neural/sequence_buffer.py`
+- Branche conditionnelle dans `RecurrentDQNAgent` (V2-Y) et `ConvRecurrentDQNAgent` (V2-ZY) : `cfg.b1a_enabled` default `False` → backwards compat strict V2-U / V2-B0
+- Hook `agent.on_new_best()` appelé par `ConvRecurrentProceduralDQNRunner` (V2-ZY) après `best_tracker.update()` retourne True. **Asymétrie intentionnelle MVP** : V2-Y agent expose l'API mais runner V2-Y n'a pas de hook (bench cible exclusif V2-ZY).
+- Orthogonal V2-U Polyak et V2-B0 PER : 4 combinaisons (B1a × PER) cohabitent (`_sample_training_batch` gère les 4 branches).
+
+### Critère succès (bench n=5 same-seed pattern V2-U)
+
+**Bras 3 (B1a seul) — 15×15 test scientifique** : au moins 1 critère parmi {mean > 64 %, min > 50 %, médiane ep_to_best < baseline médiane, diff_max > 0.36}.
+
+**Bras 4 (B1a + PER) — 15×15 factoriel 2×2** : décider si l'interaction B1a × PER renverse la pathologie scaling PER, ou si B1a seul suffit, ou si les deux échouent.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :
