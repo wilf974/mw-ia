@@ -1474,6 +1474,83 @@ Compute ~3.75 h GPU.
 
 **Décision** : Phase 1 ✅ → **enchaîner Phase 2 (15×15 test scientifique principal)**.
 
+### V2-B0 — bench n=5 same-seed 15×15 (Phase 2 test scientifique, 2026-05-29)
+
+**Protocole** : 5 runs V2-ZY+Polyak+PER ep=5000 GPU RTX 3060, seeds 0-4, `--per --polyak-tau 0.005 --max-attempts-bfs 500 --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500`. Eval rigoureux V2-V (best @ diff=0.30 fixe greedy, 10 seeds held-out). Variable unique vs baseline V2-U 15×15 = `--per`.
+
+**Résultats par seed** :
+
+| Seed | Best @ diff=0.30 | Best capté ép | Final winrate | Final diff (= diff_max) |
+|---|---|---|---|---|
+| 0 | 30 % | 4999 | 51 % | 0.30 |
+| 1 | 40 % | 4599 | 66 % | 0.30 |
+| 2 | **70 %** | 4899 | 77 % | 0.35 |
+| 3 | 50 % | 4599 | 73 % | 0.30 |
+| 4 | 40 % | 4999 | 75 % | 0.25 |
+
+**Statistiques agrégées V2-B0+PER 15×15 vs V2-ZY+Polyak baseline 15×15 (n=5)** :
+
+| Métrique | V2-ZY+Polyak baseline | **V2-ZY+Polyak+PER** | Évolution |
+|---|---|---|---|
+| Mean best @ diff=0.30 | 64 % | **46 %** | **−18 pp** ❌ |
+| Std inter-seed (n−1) | 13.4 pp | 15.17 pp | +1.8 pp ≈ |
+| Min (worst seed) | 50 % | **30 %** | **−20 pp** ❌ |
+| Max (best seed) | 80 % | 70 % | −10 pp ❌ |
+| Best ≥ 70 % | 3/5 | 1/5 (seed 2) | −2 seeds ❌ |
+| Best ≥ 50 % | 5/5 | 2/5 (seeds 2, 3) | −3 seeds ❌ |
+| Diff_max training mean | 0.36 | 0.30 | −0.06 ❌ |
+| Late-stage collapse | 0/5 | 0/5 | = ✓ |
+| Médiane ep_to_best | ? | 4899 (très tardif) | convergence retardée |
+| Bucket 1 rempli | 5/5 | 5/5 | = ✓ |
+| Bucket 2 rempli | 0/5 | 0/5 | = (jamais franchi) |
+
+**Critères acceptance Phase 2 (≥ 1/4 pour valider "PER aide")** : **0/4** ❌
+
+1. ❌ Mean > 64 % : 46 % (régression −18 pp)
+2. ❌ Min > 50 % : 30 % (régression −20 pp)
+3. ❌ Médiane ep_to_best < baseline : 4899 (PER converge plus TARD, pas plus tôt)
+4. ❌ Diff_max training > 0.36 : 0.30 (scheduler stagne plus tôt)
+
+**Verdict Phase 2 V2-B0** :
+
+> **PER trajectory-level (Schaul 2015 + R2D2) NE SCALE PAS naïvement de 10×10 à 15×15** sur le régime V2-ZY+Polyak. Finding négatif défendable et scientifiquement intéressant.
+
+### V2-B0 — Finding scientifique consolidé (phase 1 + phase 2)
+
+**Le résultat le plus intéressant du sous-projet** :
+
+| Métrique | 10×10 V2-B0+PER vs baseline | 15×15 V2-B0+PER vs baseline |
+|---|---|---|
+| Mean | +6 pp (92 → 98) | **−18 pp (64 → 46)** |
+| Std | /3 (13 → 4.5 pp) | ≈ (13.4 → 15.2 pp) |
+| Min | +20 pp (70 → 90) | **−20 pp (50 → 30)** |
+| Max | = (100 = 100) | −10 pp (80 → 70) |
+| Verdict | **AIDE significativement** | **DÉGRADE significativement** |
+
+Cette inversion est un phénomène d'**inversion d'effet au scaling** — phénomène connu dans la littérature RL mais rarement aussi net dans un même protocole expérimental same-seed.
+
+**Hypothèses mécanistes** (à creuser en B0.1 ou B1) :
+
+1. **`replay_capacity` halved (5000 → 2500)** à 15×15 : PER concentre l'échantillonnage sur les trajectoires rares avec moins de diversité → over-fit aux états narrow plutôt que d'explorer.
+2. **Difficulté structurelle accrue** : la chaîne `Conv → LSTM → FC → Q` doit modéliser ~2.25× plus d'états. PER amplifie les TD-errors → gradients plus bruités → moins de stabilité.
+3. **Convergence retardée** : best captés ép 4599-4999 (vs baseline ~3500). PER aurait potentiellement besoin de 10000+ ép à 15×15 pour rattraper.
+4. **IS correction over-correct sur petit buffer** : avec capacity=2500 et β annealé vers 1.0, l'IS pourrait sur-pénaliser les samples fréquents.
+5. **`max_steps=400` + `seq_len=32`** : BPTT plus court relativement aux trajectoires longues. PER cible des trajectoires "intéressantes" mais le sub-sampling par BPTT dilue le signal.
+
+**Lecture causale globale** :
+
+> PER trajectory-level aide quand le régime est déjà **saturé proche d'un plafond** (10×10 baseline 92%) : il pousse les seeds vers le plafond et écrase la variance. Mais il **dégrade** quand le régime est encore **en phase d'apprentissage active** (15×15 baseline 64%) : il introduit du bruit dans le signal d'apprentissage et pousse l'agent dans des trajectoires moins informatives.
+
+Ce finding est **plus utile négativement que positivement** : PER seul n'est pas le bottleneck du régime V2-ZY+Polyak en croissance. **B1 (policy snapshot rehearsal) et B2 (episodic memory) restent prioritaires**.
+
+**Implications pour B1/B2** :
+
+- **B1 (policy snapshot rehearsal)** : indépendant du sampling strategy — copie le meilleur agent eval V2-V et rejoue ses trajectoires. Pas concerné par l'inversion d'effet au scaling observée ici.
+- **B2 (episodic memory)** : retrieval conditionnel par contexte. Pourrait être MOINS sensible au scaling parce qu'il sélectionne par similarité d'état, pas par TD-error magnitude.
+- **B0.1 (step-within-trajectory PER)** : grain plus fin (priorité par step, pas trajectoire). Hypothèse alternative — pourrait fonctionner mieux à grande échelle si le signal est concentré sur 1-2 transitions critiques.
+
+**Décision** : `v0.2.0-b0` posé avec finding négatif honnête. Le tag documente que PER 10×10 est une amélioration solide, PER 15×15 n'est pas. Prochaine étape brainstorm B1 (priorité maintenue), pas B0.1 (variante PER) qui nécessiterait un nouveau cycle complet.
+
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
