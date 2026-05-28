@@ -90,3 +90,57 @@ def test_sample_random_offset_within_long_trajectory():
     buf.push_trajectory(_trajectory(length=50))
     batch = buf.sample(batch_size=1, seq_len=10)
     assert batch.mask.sum() == 10.0   # tous les steps sont des vrais steps
+
+
+# === V2-B1a : concat_batchseq tests ===
+from mw_ia.neural.sequence_buffer import BatchSeq, concat_batchseq
+
+
+def _make_batchseq(seq_len: int, batch_size: int, obs_dim: int, fill_value: float = 0.0) -> BatchSeq:
+    """Helper pour construire BatchSeq synthétique."""
+    return BatchSeq(
+        states=np.full((seq_len, batch_size, obs_dim), fill_value, dtype=np.float32),
+        actions=np.zeros((seq_len, batch_size), dtype=np.int64),
+        rewards=np.zeros((seq_len, batch_size), dtype=np.float32),
+        next_states=np.full((seq_len, batch_size, obs_dim), fill_value, dtype=np.float32),
+        dones=np.zeros((seq_len, batch_size), dtype=np.float32),
+        mask=np.ones((seq_len, batch_size), dtype=np.float32),
+    )
+
+
+def test_concat_batchseq_axis_correct() -> None:
+    """concat_batchseq concat le long de la dimension batch (axis=1), pas seq (axis=0)."""
+    a = _make_batchseq(seq_len=8, batch_size=4, obs_dim=10, fill_value=1.0)
+    b = _make_batchseq(seq_len=8, batch_size=3, obs_dim=10, fill_value=2.0)
+    c = concat_batchseq(a, b)
+    # Shape attendue : (8, 4+3, 10) - concat sur axis=1
+    assert c.states.shape == (8, 7, 10)
+    assert c.actions.shape == (8, 7)
+    assert c.rewards.shape == (8, 7)
+    assert c.next_states.shape == (8, 7, 10)
+    assert c.dones.shape == (8, 7)
+    assert c.mask.shape == (8, 7)
+
+
+def test_concat_batchseq_preserves_content() -> None:
+    """Les valeurs de a et b sont preservees dans l'ordre."""
+    a = _make_batchseq(seq_len=4, batch_size=2, obs_dim=5, fill_value=1.0)
+    b = _make_batchseq(seq_len=4, batch_size=3, obs_dim=5, fill_value=2.0)
+    c = concat_batchseq(a, b)
+    # Les 2 premieres colonnes batch viennent de a (fill_value=1.0)
+    assert np.all(c.states[:, :2] == 1.0)
+    # Les 3 dernieres colonnes batch viennent de b (fill_value=2.0)
+    assert np.all(c.states[:, 2:] == 2.0)
+
+
+def test_concat_batchseq_dtype_preserved() -> None:
+    """Dtypes float32 / int64 preserves (pas de cast implicite)."""
+    a = _make_batchseq(seq_len=4, batch_size=2, obs_dim=5)
+    b = _make_batchseq(seq_len=4, batch_size=2, obs_dim=5)
+    c = concat_batchseq(a, b)
+    assert c.states.dtype == np.float32
+    assert c.actions.dtype == np.int64
+    assert c.rewards.dtype == np.float32
+    assert c.next_states.dtype == np.float32
+    assert c.dones.dtype == np.float32
+    assert c.mask.dtype == np.float32

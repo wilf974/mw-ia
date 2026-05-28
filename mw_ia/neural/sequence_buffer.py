@@ -24,6 +24,22 @@ class BatchSeq:
     mask: np.ndarray         # (seq, batch) float32 — 1 pour vrais steps, 0 pour padding
 
 
+def concat_batchseq(a: BatchSeq, b: BatchSeq) -> BatchSeq:
+    """Concat 2 BatchSeq le long de la dimension batch (axis=1).
+
+    Préconditions : seq_len identique, obs_dim identique. Aucun cast de dtype.
+    Utilisé par V2-B1a pour mixer main buffer + snapshot_store dans batch.
+    """
+    return BatchSeq(
+        states=np.concatenate([a.states, b.states], axis=1),
+        actions=np.concatenate([a.actions, b.actions], axis=1),
+        rewards=np.concatenate([a.rewards, b.rewards], axis=1),
+        next_states=np.concatenate([a.next_states, b.next_states], axis=1),
+        dones=np.concatenate([a.dones, b.dones], axis=1),
+        mask=np.concatenate([a.mask, b.mask], axis=1),
+    )
+
+
 class SequenceReplayBuffer:
     """Buffer circulaire de trajectoires complètes.
 
