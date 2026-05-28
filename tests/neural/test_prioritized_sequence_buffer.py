@@ -188,3 +188,36 @@ def test_conv_recurrent_config_per_beta_end_out_of_range_raises() -> None:
 def test_conv_recurrent_config_per_eta_out_of_range_raises() -> None:
     with pytest.raises(ValueError, match="per_eta"):
         ConvRecurrentDQNConfig(per_eta=-0.1)
+
+
+# === V2-B1a config validation tests ===
+def test_drqn_config_b1a_snapshot_size_zero_raises() -> None:
+    with pytest.raises(ValueError, match="b1a_snapshot_size"):
+        DRQNConfig(b1a_snapshot_size=0)
+    with pytest.raises(ValueError, match="b1a_snapshot_size"):
+        DRQNConfig(b1a_snapshot_size=-1)
+
+
+def test_drqn_config_b1a_n_windows_zero_raises() -> None:
+    with pytest.raises(ValueError, match="b1a_n_windows"):
+        DRQNConfig(b1a_n_windows=0)
+    with pytest.raises(ValueError, match="b1a_n_windows"):
+        DRQNConfig(b1a_n_windows=-2)
+
+
+def test_drqn_config_b1a_mix_ratio_out_of_range_raises() -> None:
+    with pytest.raises(ValueError, match="b1a_mix_ratio"):
+        DRQNConfig(b1a_mix_ratio=0.0)
+    with pytest.raises(ValueError, match="b1a_mix_ratio"):
+        DRQNConfig(b1a_mix_ratio=1.0)
+    with pytest.raises(ValueError, match="b1a_mix_ratio"):
+        DRQNConfig(b1a_mix_ratio=1.5)
+    with pytest.raises(ValueError, match="b1a_mix_ratio"):
+        DRQNConfig(b1a_mix_ratio=-0.1)
+
+
+def test_conv_recurrent_config_b1a_validation_parallel() -> None:
+    with pytest.raises(ValueError, match="b1a_mix_ratio"):
+        ConvRecurrentDQNConfig(b1a_mix_ratio=-0.1)
+    with pytest.raises(ValueError, match="b1a_snapshot_size"):
+        ConvRecurrentDQNConfig(b1a_snapshot_size=0)

@@ -185,6 +185,12 @@ class DRQNConfig:
     per_eta: float = 0.9                # R2D2 aggregation : eta*max + (1-eta)*mean
     per_epsilon: float = 1e-6           # small constant garantit priority > 0
 
+    # V2-B1a : Policy Snapshot Rehearsal (sliding window N captures x snapshot_size traj)
+    b1a_enabled: bool = False
+    b1a_snapshot_size: int = 50      # nombre de trajectoires capturees par best
+    b1a_n_windows: int = 3           # sliding window FIFO
+    b1a_mix_ratio: float = 0.2       # fraction du batch venant du snapshot
+
     # Training
     episodes: int = 5_000
     max_steps_per_episode: int = 200
@@ -250,6 +256,14 @@ class DRQNConfig:
             raise ValueError(f"per_eta doit etre dans [0, 1], recu {self.per_eta}")
         if self.per_epsilon <= 0.0:
             raise ValueError(f"per_epsilon doit etre > 0, recu {self.per_epsilon}")
+        if self.b1a_snapshot_size <= 0:
+            raise ValueError(f"b1a_snapshot_size doit etre > 0, recu {self.b1a_snapshot_size}")
+        if self.b1a_n_windows <= 0:
+            raise ValueError(f"b1a_n_windows doit etre > 0, recu {self.b1a_n_windows}")
+        if not (0.0 < self.b1a_mix_ratio < 1.0):
+            raise ValueError(
+                f"b1a_mix_ratio doit etre dans ]0, 1[, recu {self.b1a_mix_ratio}"
+            )
 
 
 @dataclass(frozen=True)
@@ -407,6 +421,12 @@ class ConvRecurrentDQNConfig:
     per_eta: float = 0.9
     per_epsilon: float = 1e-6
 
+    # V2-B1a : Policy Snapshot Rehearsal (sliding window N captures x snapshot_size traj)
+    b1a_enabled: bool = False
+    b1a_snapshot_size: int = 50
+    b1a_n_windows: int = 3
+    b1a_mix_ratio: float = 0.2
+
     # V2-V : Training Protocol Stabilization (activé par défaut V2-ZY)
     eval_enabled: bool = True
     eval_every_episodes: int = 100
@@ -500,3 +520,11 @@ class ConvRecurrentDQNConfig:
             raise ValueError(f"per_eta doit etre dans [0, 1], recu {self.per_eta}")
         if self.per_epsilon <= 0.0:
             raise ValueError(f"per_epsilon doit etre > 0, recu {self.per_epsilon}")
+        if self.b1a_snapshot_size <= 0:
+            raise ValueError(f"b1a_snapshot_size doit etre > 0, recu {self.b1a_snapshot_size}")
+        if self.b1a_n_windows <= 0:
+            raise ValueError(f"b1a_n_windows doit etre > 0, recu {self.b1a_n_windows}")
+        if not (0.0 < self.b1a_mix_ratio < 1.0):
+            raise ValueError(
+                f"b1a_mix_ratio doit etre dans ]0, 1[, recu {self.b1a_mix_ratio}"
+            )
