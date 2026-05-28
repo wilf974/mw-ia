@@ -732,6 +732,14 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                     self.agent, self.dqn_cfg.eval_target_difficulty,
                 )
                 improved = self.best_tracker.update(eval_metrics, self.agent, episode=ep)
+                if improved:
+                    n_captured = self.agent.on_new_best()
+                    if n_captured > 0:
+                        self.callbacks.fire_log(
+                            "info",
+                            f"B1a snapshot capture : {n_captured} trajectoires "
+                            f"(capture #{self.agent.snapshot_store.n_captures})",
+                        )
                 self.callbacks.fire_evaluation(
                     ep=ep,
                     eval_winrate=eval_metrics["winrate"],
