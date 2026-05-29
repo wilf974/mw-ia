@@ -39,7 +39,7 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 | **V** | Training Protocol Stabilization (eval + best-checkpoint) | ✅ Livré (tag `v0.2.0-v`) |
 | **ZY** | CNN + LSTM + Double DQN combiné | ✅ Livré (tag `v0.2.0-zy`) |
 | **U** | Polyak soft target update | ✅ Livré (tag `v0.2.0-u`) |
-| **B** | Mémoire persistante cross-session | ⏳ **Prochain par défaut** |
+| **B** | Mémoire persistante cross-session | 🔬 En cours — B0 (PER) + B1a (snapshot rehearsal) livrés, **findings négatifs à 15×15** (tags `v0.2.0-b0`, `v0.2.0-b1a`). B2/autre piste à brainstormer. |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
 | E | Auto-modification (proposer/tester variants) | Pas commencé |
@@ -1565,9 +1565,9 @@ Ce finding est **plus utile négativement que positivement** : PER seul n'est pa
 | 8 — CI smoke V2-B1a (B1a seul + B1a+Polyak cohabit) | T8 | ✅ | 0 | 1 |
 | 9 — Sanity verification end-to-end | T9 | ✅ | 0 | 0 |
 | 10 — Doc README + CLAUDE.md | T10 | ✅ | 0 | 1 |
-| 11 — Bench Bras 3 (B1a seul) 15×15 GPU n=5 ~5-6h | T11 | ⏳ pending | 0 | TBD |
-| 12 — Bench Bras 4 (B1a+PER) 15×15 GPU n=5 + factoriel 2×2 ~5-6h | T12 | ⏳ pending | 0 | TBD |
-| 13 — Tag `v0.2.0-b1a` + finding consolidé | T13 | ⏳ après bench | — | tag |
+| 11 — Bench Bras 3 (B1a seul) 15×15 GPU n=5 ~5-6h | T11 | ✅ | 0 | bench |
+| 12 — Bench Bras 4 (B1a+PER) 15×15 GPU n=5 + factoriel 2×2 ~5-6h | T12 | ✅ | 0 | bench |
+| 13 — Tag `v0.2.0-b1a` + finding consolidé | T13 | ✅ | — | tag |
 
 ### Composants V2-B1a livrés
 
@@ -1601,43 +1601,84 @@ Ce finding est **plus utile négativement que positivement** : PER seul n'est pa
 5. **`b1a_mix_ratio ∈ ]0, 1[` strict** : 0.0 ou 1.0 invalide (validation `__post_init__`). Si quelqu'un veut "tout principal" il doit faire `--no-b1a`, pas `--b1a-mix-ratio 0`.
 6. **`max_attempts_bfs=100` par défaut** : même piège que V2-B0 (cf. piège #10 V2-X). Bench V2-B1a recommande `--max-attempts-bfs 500`.
 
-### V2-B1a — bench protocol (Tasks 11-12, pending GPU)
+### V2-B1a — bench protocol (Tasks 11-12)
 
 Pattern V2-B0 reproduit strict + factoriel 2×2 (B1a × PER) :
 - n=5 same-seed (seeds 0-4) par bras
 - Eval rigoureux V2-V (best @ diff=0.30 fixe greedy, 10 seeds held-out 10000-10009)
+- Script reproductible : `scripts/bench_v2b1a.sh` (logs uniques par seed, gate GPU)
 
-**Bras 3 — B1a seul à 15×15 (test scientifique principal)** :
-```bash
-for seed in 0 1 2 3 4; do
-  python scripts/train_cnn_lstm_dqn_procedural.py \
-    --episodes 5000 --mode obstacles --device cuda --seed $seed \
-    --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
-    --polyak-tau 0.005 --b1a --max-attempts-bfs 500 \
-    --best-checkpoint-path checkpoints/v2b1a_bras3_seed${seed}.pt
-done
+**Bras 3 — B1a seul à 15×15** : `--polyak-tau 0.005 --b1a --max-attempts-bfs 500` (n=5 seeds 0-4)
+**Bras 4 — B1a + PER à 15×15** : idem + `--per` (n=5 seeds 0-4)
+
+### V2-B1a — bench n=5 same-seed 15×15 factoriel 2×2 (2026-05-29, finding NÉGATIF)
+
+**Protocole** : 10 runs ep=5000 GPU RTX 3060 (Bras 3 + Bras 4), seeds 0-4, via `scripts/bench_v2b1a.sh`. Eval rigoureux V2-V best @ diff=0.30 fixe. Variable unique vs baseline V2-U 15×15 = `--b1a` (± `--per`). Compute total ~7h30. 10/10 exit 0, aucun crash.
+
+**Résultats par seed (Best @ diff=0.30, eval greedy strict)** :
+
+| Seed | Baseline V2-U | Bras 3 (B1a) | Final B3 | Bras 4 (B1a+PER) | Final B4 |
+|---|---|---|---|---|---|
+| 0 | 70 % | **90 %** | 66 % @ 0.40 | 50 % | 72 % @ 0.30 |
+| 1 | 50 % | 50 % | 86 % @ 0.35 | 30 % | 61 % @ 0.35 |
+| 2 | 70 % | 40 % | 63 % @ 0.35 | 50 % | 59 % @ 0.40 |
+| 3 | 80 % | 50 % | 55 % @ 0.35 | 70 % | 67 % @ 0.35 |
+| 4 | 50 % | 40 % | 78 % @ 0.30 | 40 % | 80 % @ 0.30 |
+
+**Synthèse factorielle 2×2 — mean best @ diff=0.30 (15×15)** :
+
+|  | **PER off** | **PER on** |
+|---|---|---|
+| **B1a off** | **64 %** (baseline V2-U) | 46 % (V2-B0) |
+| **B1a on** | **54 %** (Bras 3) | 48 % (Bras 4) |
+
+**Statistiques agrégées (n=5)** :
+
+| Métrique | Baseline V2-U | Bras 3 (B1a) | Bras 4 (B1a+PER) |
+|---|---|---|---|
+| Mean best @ diff=0.30 | 64 % | **54 %** (−10 pp) | **48 %** (−16 pp) |
+| Std inter-seed (n−1) | 13.4 pp | 20.7 pp | 14.8 pp |
+| Min (worst seed) | 50 % | 40 % | 30 % |
+| Max | 80 % | 90 % | 70 % |
+| Late-stage collapse | 0/5 | **0/5** ✓ | **0/5** ✓ |
+| ep_to_best médian | ~4799 | 4799 (tardif) | 4699 (tardif) |
+| diff_max training mean | 0.36 | 0.35 | 0.35 |
+
+**Critères acceptance Bras 3 (≥ 1/4 pour valider "B1a aide")** : **0/4** ❌
+1. ❌ Mean > 64 % : **54 %**
+2. ❌ Min > 50 % : **40 %**
+3. ❌ ep_to_best médian < baseline : **4799** (captés très tardivement ép 4599-4999)
+4. ❌ diff_max training > 0.36 : **0.35**
+
+**Verdict V2-B1a** :
+
+> **Finding NÉGATIF honnête et important.** Policy Snapshot Rehearsal (frozen trajectories near-frontier, sliding window N=3 × 50) **ne renverse PAS** la pathologie de scaling 15×15. B1a seul dégrade (−10 pp), B1a+PER dégrade (−16 pp). L'interaction B1a×PER n'annule rien : 48 % ≈ 46 % (PER seul), soit +2 pp dans le bruit. Point positif : Polyak (V2-U) fait son travail — **aucun collapse tardif** sur les 10 seeds (finals 55-86 %).
+
+### V2-B1a — finding scientifique consolidé (cascade B0 + B1a)
+
+> À 15×15 (régime d'apprentissage **actif**, pas saturé), **ni la priorisation du sampling (PER, V2-B0) ni le rehearsal de trajectoires réussies (B1a) n'améliorent V2-ZY+Polyak.** Les deux interventions ajoutent du bruit. Cohérent avec la **dépendance de phase** découverte en V2-B0 (PER aide à 10×10 saturé, dégrade à 15×15 actif).
+
+**Tableau récapitulatif des leviers testés à 15×15** :
+
+```
+15×15 actif (mean best @ diff=0.30) :
+  V2-ZY+Polyak (baseline)  = 64 %
+  + PER                    = 46 %   ❌ sampling priorisé
+  + B1a                    = 54 %   ❌ rehearsal trajectoires
+  + B1a + PER              = 48 %   ❌ interaction
 ```
 
-**Bras 4 — B1a + PER à 15×15 (factoriel 2×2)** :
-```bash
-for seed in 0 1 2 3 4; do
-  python scripts/train_cnn_lstm_dqn_procedural.py \
-    --episodes 5000 --mode obstacles --device cuda --seed $seed \
-    --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
-    --polyak-tau 0.005 --b1a --per --max-attempts-bfs 500 \
-    --best-checkpoint-path checkpoints/v2b1a_bras4_seed${seed}.pt
-done
-```
+**Lecture causale — ce que B1a élimine** :
 
-**Critères acceptance Bras 3 (≥ 1/4 pour valider "B1a aide")** :
-- Mean > 64 % (baseline V2-ZY+Polyak 15×15)
-- Min > 50 %
-- Médiane `ep_to_best` < baseline médiane
-- Diff_max training > 0.36
+> B1a montre que le bottleneck 15×15 **n'est PAS la perte de trajectoires réussies récentes** (sinon les rejouer aurait aidé). Le problème est plus profond et orthogonal au replay/sampling : probablement la **représentation** (capacité du Conv+LSTM à encoder des mazes 15×15 plus complexes), l'**exploration long-horizon** (max_steps=400, trajectoires longues sous ε=0.05), le **curriculum/horizon** (scheduler stoppe vers diff=0.35), ou le **modèle interne** (pas de planning/lookahead).
 
-**Synthèse factorielle 2×2** : décide si l'interaction B1a × PER renverse la pathologie scaling PER (B1a + PER > B1a > baseline), ou si B1a seul suffit, ou si les deux échouent.
+**Implication pour B2 et au-delà** :
 
-Compute attendu : ~10-12h GPU RTX 3060 total.
+- Deux familles de remédiations (sampling, rehearsal) sont désormais **éliminées** sans ambiguïté pour le régime 15×15 actif.
+- **B2 (episodic memory / retrieval conditionnel par contexte)** reste possible mais l'hypothèse "rejouer des expériences aide" est affaiblie par B1a. À re-cadrer.
+- Pistes orthogonales plus prometteuses : **représentation** (archi plus large, attention spatiale), **exploration** (count-based / curiosity au lieu d'ε-greedy), **horizon** (n-step returns, planning). À brainstormer.
+
+**Note infra (non bloquant)** : le hook `claude-flow` peut émettre des erreurs `npx`/`npm-cache` (`ENOTEMPTY` sur `.claude`) sans rapport avec le code MW_IA. À traiter séparément si nécessaire, n'a pas bloqué le bench ni le tag.
 
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
@@ -1655,7 +1696,7 @@ Compute attendu : ~10-12h GPU RTX 3060 total.
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy`, `v0.2.0-u`, `v0.2.0-b0` (pas de force-push)
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy`, `v0.2.0-u`, `v0.2.0-b0`, `v0.2.0-b1a` (pas de force-push)
 - Re-lancer `pytest -q` avant chaque commit (attendu : 356 passed)
 - Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`, `mw_ia/neural/conv_recurrent.py`, `mw_ia/agents/conv_recurrent_dqn.py`, `mw_ia/neural/sum_tree.py`, `mw_ia/neural/prioritized_sequence_buffer.py`, `mw_ia/training/snapshot_store.py`) sans raison documentée
 

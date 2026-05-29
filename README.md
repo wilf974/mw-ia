@@ -476,9 +476,9 @@ python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles
 
 **15×15 — test scientifique** : au moins 1 critère parmi {mean > 64 %, min > 50 %, médiane ep_to_best < baseline médiane, diff_max > 0.36}.
 
-## V2-B1a — Policy Snapshot Rehearsal (code livré, bench pending)
+## V2-B1a — Policy Snapshot Rehearsal (livré, finding NÉGATIF)
 
-**Tests** : 356 verts (323 baseline + 33 V2-B1a). **Tag** : `v0.2.0-b1a` prévu après bench n=5.
+**Tests** : 356 verts (323 baseline + 33 V2-B1a). **Tag** : `v0.2.0-b1a` posé (2026-05-29). **Verdict** : finding négatif — B1a ne renverse pas la pathologie de scaling 15×15 (cf. bench plus bas).
 
 Sous-projet B phase 1a : Policy Snapshot Rehearsal sur `SequenceReplayBuffer` V2-Y / V2-ZY. Lecture causale du finding V2-B0 phase-dependence : PER trajectoire-level aide à 10×10 (+6 pp) mais dégrade à 15×15 (−18 pp). Hypothèse B1a alternative : préserver les trajectoires near-frontier capturées au moment du best eval V2-V — sliding window FIFO de N captures × snapshot_size trajectoires immutable — suffit-il à éviter forgetting et améliorer V2-ZY+Polyak 15×15 sans la pathologie scaling de PER ?
 
@@ -520,11 +520,18 @@ python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles
 - Hook `agent.on_new_best()` appelé par `ConvRecurrentProceduralDQNRunner` (V2-ZY) après `best_tracker.update()` retourne True. **Asymétrie intentionnelle MVP** : V2-Y agent expose l'API mais runner V2-Y n'a pas de hook (bench cible exclusif V2-ZY).
 - Orthogonal V2-U Polyak et V2-B0 PER : 4 combinaisons (B1a × PER) cohabitent (`_sample_training_batch` gère les 4 branches).
 
-### Critère succès (bench n=5 same-seed pattern V2-U)
+### Bench n=5 same-seed 15×15 — factoriel 2×2 (2026-05-29, finding NÉGATIF)
 
-**Bras 3 (B1a seul) — 15×15 test scientifique** : au moins 1 critère parmi {mean > 64 %, min > 50 %, médiane ep_to_best < baseline médiane, diff_max > 0.36}.
+10 runs ep=5000 GPU via `scripts/bench_v2b1a.sh`, eval V2-V best @ diff=0.30 fixe. Synthèse :
 
-**Bras 4 (B1a + PER) — 15×15 factoriel 2×2** : décider si l'interaction B1a × PER renverse la pathologie scaling PER, ou si B1a seul suffit, ou si les deux échouent.
+|  | **PER off** | **PER on** |
+|---|---|---|
+| **B1a off** | **64 %** (baseline V2-U) | 46 % (V2-B0) |
+| **B1a on** | **54 %** (Bras 3, −10 pp) | 48 % (Bras 4, −16 pp) |
+
+**Bras 3 (B1a seul)** : 0/4 critères atteints (mean 54 %, min 40 %, ep_to_best tardif ~4799, diff_max 0.35). **Bras 4 (B1a+PER)** : 48 % ≈ PER seul → l'interaction n'annule pas la pathologie de scaling. Aucun collapse tardif sur les 10 seeds (Polyak fait son travail).
+
+**Verdict** : à 15×15 (régime actif), **ni la priorisation du sampling (PER) ni le rehearsal de trajectoires réussies (B1a)** n'améliorent V2-ZY+Polyak. B1a montre que le bottleneck **n'est PAS la perte de trajectoires réussies récentes** — le problème est plus profond (représentation, exploration long-horizon, horizon/curriculum, modèle interne). Deux familles de remédiations éliminées sans ambiguïté. Détails complets dans `CLAUDE.md`.
 
 ## Roadmap (V2+)
 
