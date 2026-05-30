@@ -7,6 +7,7 @@ import numpy as np
 
 from mw_ia.config import GridWorldConfig, ProceduralEnvConfig
 from mw_ia.envs.gridworld import Action, GridWorld
+from mw_ia.envs.maze_generators import bfs_distance_field
 
 
 class MazeGenerator(Protocol):
@@ -126,6 +127,7 @@ def encode_procedural_observation_2d(
     goal: tuple[int, int],
     max_rows: int,
     max_cols: int,
+    oracle_mode: str = "none",
 ) -> np.ndarray:
     """Encode l'observation procédural pour ConvQNetwork (V2-Z).
 
@@ -164,4 +166,25 @@ def encode_procedural_observation_2d(
     obs[0, state[0], state[1]] = 1.0
     obs[1, :rows, :cols] = grid.astype(np.float32)
     obs[2, goal[0], goal[1]] = 1.0
-    return obs
+
+    if oracle_mode == "none":
+        return obs
+    if oracle_mode not in ("scalar", "field"):
+        raise ValueError(
+            f"oracle_mode doit etre none|scalar|field, recu {oracle_mode}"
+        )
+
+    rows, cols = grid.shape
+    dist_norm = float(max_rows * max_cols)
+    dist = bfs_distance_field(grid, goal=goal)  # (rows, cols), inf hors-atteignable
+    # Normalisation + sentinelle 1.0 pour obstacle / non-atteignable.
+    norm_field = np.where(np.isfinite(dist), dist / dist_norm, 1.0)
+    norm_field = np.clip(norm_field, 0.0, 1.0).astype(np.float32)
+
+    oracle_chan = np.ones((max_rows, max_cols), dtype=np.float32)  # padding = 1.0
+    if oracle_mode == "field":
+        oracle_chan[:rows, :cols] = norm_field
+    else:  # scalar : plan uniforme = distance de l'agent au goal
+        oracle_chan[:] = norm_field[state[0], state[1]]
+
+    return np.concatenate([obs, oracle_chan[np.newaxis, :, :]], axis=0)
