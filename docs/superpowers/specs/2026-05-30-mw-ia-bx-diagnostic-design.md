@@ -78,14 +78,24 @@ python scripts/train_cnn_lstm_dqn_procedural.py \
 
 Donner à l'agent la **réponse-comme-feature** et voir s'il débloque. Graduée du minimal au maximal :
 
+**Mécanisme d'injection unifié (décision de plan, 2026-05-30)** : C1 et C2 passent **tous deux par un 4ᵉ canal d'observation** (`in_channels 3→4`, déjà paramétré dans `ConvRecurrentQNetwork`). Le mode change uniquement le **contenu** du canal oracle. Ce choix **remplace le concat-pré-LSTM** initialement prévu (qui aurait cassé l'interface `(in_channels, rows, cols)` de l'agent et imposé une voie `extra_features` à travers encodeur + agent + réseau). **Diagnostiquement équivalent pour C1** — beaucoup moins invasif : zéro chirurgie réseau, agent inchangé, asserts 3D préservés, plomberie C1/C2 partagée.
+
+> Note : le scalaire C1 traverse le conv (au lieu de le bypasser). Un plan uniforme reste trivialement décodable après 2 convs 3×3 padding=1, et la LSTM voit toujours la **séquence temporelle** `distance_t, distance_t+1, …` → elle peut apprendre « est-ce que je me rapproche du goal ? ». Risque de faux négatif négligeable.
+
 **Normalisation commune** : `dist_norm = rows * cols` (borne supérieure sûre de toute longueur de chemin BFS 4-connexe dans la grille), fixe et identique pour tous les mazes ⇒ valeurs comparables entre épisodes (un normaliseur par-maze rendrait le scalaire non comparable). Convention : **0.0 = sur le goal**, valeurs croissantes en s'éloignant.
 
-- **C1 — scalaire** : `BFS(agent → goal) / dist_norm`, un seul nombre dans [0,1]. Injecté **après le flatten conv, concaténé avant la LSTM** (dimension d'entrée LSTM `+1`). Teste l'ajout représentationnel **minimal** (« un sens du progrès »). Mappe 1:1 vers une vraie solution cheap = *auxiliary distance head*.
-- **C2 — champ (escalade conditionnelle)** : 4ᵉ canal d'observation = **carte de distance-au-goal BFS par cellule** (`BFS(cellule → goal) / dist_norm` en chaque case libre atteignable). Convention sentinelle explicite : **cellules-obstacle, cellules non-atteignables et padding = 1.0** (valeur « plus loin que tout »), goal = 0.0. Oracle **maximal** : l'agent n'a qu'à suivre le gradient descendant. Code le moins invasif (`in_channels 3→4`, déjà paramétré dans `ConvRecurrentQNetwork`).
+| Mode (`bx_repr_oracle`) | `in_channels` | Contenu du 4ᵉ canal |
+|---|---|---|
+| `"none"` (baseline) | 3 | — (aucun canal oracle) |
+| `"scalar"` (C1) | 4 | **plan uniforme** rempli de `BFS(agent → goal) / dist_norm` |
+| `"field"` (C2) | 4 | **champ** `BFS(cellule → goal) / dist_norm` par cellule libre |
 
-**BFS** : réutilise `maze_bfs_check` / la logique BFS de `mw_ia/envs/maze_generators.py` pour calculer les distances géodésiques 4-connexes. Calculé au `reset()` (maze figé sur l'épisode).
+- **C1 — scalaire** : teste l'ajout représentationnel **minimal** (« un sens du progrès »). Mappe 1:1 vers une vraie solution cheap = *auxiliary distance head*.
+- **C2 — champ (escalade conditionnelle)** : oracle **maximal**, l'agent n'a qu'à suivre le gradient descendant. Convention sentinelle explicite : **cellules-obstacle, cellules non-atteignables et padding = 1.0** (« plus loin que tout »), goal = 0.0.
 
-**Blast radius** : `config.py` (flag `bx_repr_oracle: str = "none" | "scalar" | "field"`), `procedural_env.py` (encodeur produisant scalaire ou 4ᵉ canal), `conv_recurrent.py` (branche concat conditionnelle pour C1 / `in_channels=4` pour C2). Tout conditionnel.
+**BFS** : nouvelle fonction `bfs_distance_field(grid, goal)` dans `mw_ia/envs/maze_generators.py` (BFS 4-connexe **depuis le goal** vers toutes les cellules), réutilisant le pattern de `maze_bfs_check`. Le scalaire C1 = `field[agent]`. Calculé au moment de l'encodage (maze figé sur l'épisode).
+
+**Blast radius** : `maze_generators.py` (fonction `bfs_distance_field`), `config.py` (flag `bx_repr_oracle: str = "none"`), `procedural_env.py` (nouvel encodeur `encode_procedural_observation_2d` étendu / variante 4-canaux), wiring `in_channels` dans le runner/agent. **Aucune modification de `conv_recurrent.py`** (in_channels suffit). Tout conditionnel.
 
 ### 5.2 Sonde A — Horizon (si C négatif)
 
@@ -145,7 +155,7 @@ Confirmation V2-V (famille gagnante) : best @ diff=0.30 greedy, n=5
 
 | Sonde | Fichiers touchés | Mécanisme | Tests unitaires |
 |---|---|---|---|
-| **C1/C2** | `config.py`, `procedural_env.py`, `conv_recurrent.py` | distance/​champ BFS via logique `maze_generators` | correction distance BFS sur maze connu ; shape obs (scalaire vs 4ᵉ canal) ; forward réseau avec/sans oracle ; no-op si `none` |
+| **C1/C2** | `maze_generators.py`, `config.py`, `procedural_env.py`, wiring `in_channels` (runner/agent) | 4ᵉ canal (plan uniforme C1 / champ C2) via `bfs_distance_field` | exactitude `bfs_distance_field` sur maze connu ; shape obs (3 vs 4 canaux) ; contenu canal oracle (uniforme vs champ) ; no-op si `none` |
 | **A** | `scripts/train_cnn_lstm_dqn_procedural.py` | flag `--gamma` → champ config existant | plumbing γ CLI → config → trainer |
 | **B** | `config.py`, `gridworld.py`/`procedural_env.py` | bonus reward count-based, table par épisode | calcul bonus `β/√visits` ; reset table au `reset()` ; `β=0` ⇒ reward inchangé |
 
