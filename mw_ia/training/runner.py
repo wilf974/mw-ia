@@ -654,6 +654,20 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
             self.evaluator = None
             self.best_tracker = None
 
+        self._visit_counts: dict[tuple[int, int], int] = {}
+
+    def _reset_novelty(self) -> None:
+        """Reset la table de comptes de visites (debut d'episode / maze)."""
+        self._visit_counts = {}
+
+    def _novelty_bonus(self, cell: tuple[int, int]) -> float:
+        """Bonus count-based pur beta / sqrt(visits) (Sonde B). 0 si beta=0."""
+        beta = self.dqn_cfg.bx_novelty_beta
+        if beta <= 0.0:
+            return 0.0
+        self._visit_counts[cell] = self._visit_counts.get(cell, 0) + 1
+        return beta / math.sqrt(self._visit_counts[cell])
+
     def run(self) -> None:
         self.callbacks.fire_log(
             "info",
@@ -680,6 +694,7 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
 
             self.agent.reset_hidden()
             self.agent.begin_episode()
+            self._reset_novelty()
 
             ep_reward = 0.0
             ep_len = 0
@@ -696,6 +711,7 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                 )
                 a = self.agent.act(obs)
                 s2, r, terminated, truncated, _ = self.env.step(a)
+                r = r + self._novelty_bonus(s2)
                 next_obs = encode_procedural_observation_2d(
                     state=s2, grid=maze, goal=goal,
                     max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,

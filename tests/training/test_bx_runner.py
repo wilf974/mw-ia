@@ -50,3 +50,18 @@ def test_field_oracle_runs_end_to_end():
 def test_novelty_bonus_runs_end_to_end():
     runner = _make_runner(bx_novelty_beta=0.1)
     runner.run()  # reward shaping ne casse pas la boucle
+
+
+def test_novelty_bonus_value_formula():
+    runner = _make_runner(bx_novelty_beta=0.2)
+    runner._reset_novelty()
+    b1 = runner._novelty_bonus((1, 1))  # 1re visite -> 0.2 / sqrt(1)
+    b2 = runner._novelty_bonus((1, 1))  # 2e visite  -> 0.2 / sqrt(2)
+    assert abs(b1 - 0.2) < 1e-9
+    assert abs(b2 - 0.2 / (2 ** 0.5)) < 1e-9
+
+
+def test_novelty_bonus_zero_when_beta_zero():
+    runner = _make_runner(bx_novelty_beta=0.0)
+    runner._reset_novelty()
+    assert runner._novelty_bonus((0, 0)) == 0.0
