@@ -427,6 +427,10 @@ class ConvRecurrentDQNConfig:
     b1a_n_windows: int = 3
     b1a_mix_ratio: float = 0.2
 
+    # V2-BX : sondes-oracles diagnostiques (jetables, default = no-op)
+    bx_repr_oracle: str = "none"   # "none" | "scalar" (C1) | "field" (C2)
+    bx_novelty_beta: float = 0.0   # bonus exploration count-based (Sonde B)
+
     # V2-V : Training Protocol Stabilization (activé par défaut V2-ZY)
     eval_enabled: bool = True
     eval_every_episodes: int = 100
@@ -527,4 +531,12 @@ class ConvRecurrentDQNConfig:
         if not (0.0 < self.b1a_mix_ratio < 1.0):
             raise ValueError(
                 f"b1a_mix_ratio doit etre dans ]0, 1[, recu {self.b1a_mix_ratio}"
+            )
+        if self.bx_repr_oracle not in ("none", "scalar", "field"):
+            raise ValueError(
+                f"bx_repr_oracle doit etre none|scalar|field, recu {self.bx_repr_oracle}"
+            )
+        if self.bx_novelty_beta < 0.0:
+            raise ValueError(
+                f"bx_novelty_beta doit etre >= 0, recu {self.bx_novelty_beta}"
             )
