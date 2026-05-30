@@ -5,6 +5,8 @@ branche `RunnerCallbacks` sur ses `pyqtSignal`.
 """
 from __future__ import annotations
 
+import functools
+import math
 from dataclasses import dataclass
 from typing import Callable
 
@@ -625,8 +627,9 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
         self.sched_cfg = sched_cfg
         self.scheduler = AdaptiveDifficultyScheduler(sched_cfg)
         self.bucket_tracker = DifficultyBucketTracker(train_cfg)
+        in_channels = 4 if dqn_cfg.bx_repr_oracle != "none" else 3
         self.agent = ConvRecurrentDQNAgent(
-            in_channels=3, rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
+            in_channels=in_channels, rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
             n_actions=4, cfg=dqn_cfg, device=device, seed=seed,
         )
 
@@ -638,7 +641,10 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                 eval_env=eval_env,
                 eval_seeds=dqn_cfg.eval_seeds,
                 max_steps=dqn_cfg.eval_max_steps,
-                observation_encoder=encode_procedural_observation_2d,
+                observation_encoder=functools.partial(
+                    encode_procedural_observation_2d,
+                    oracle_mode=dqn_cfg.bx_repr_oracle,
+                ),
                 proc_cfg=proc_cfg,
             )
             self.best_tracker: BestCheckpointTracker | None = BestCheckpointTracker(
@@ -686,12 +692,14 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                 obs = encode_procedural_observation_2d(
                     state=state, grid=maze, goal=goal,
                     max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                    oracle_mode=self.dqn_cfg.bx_repr_oracle,
                 )
                 a = self.agent.act(obs)
                 s2, r, terminated, truncated, _ = self.env.step(a)
                 next_obs = encode_procedural_observation_2d(
                     state=s2, grid=maze, goal=goal,
                     max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
+                    oracle_mode=self.dqn_cfg.bx_repr_oracle,
                 )
                 self.agent.observe(obs, a, r, next_obs, terminated or truncated)
                 self.callbacks.fire_step(state=state, action=a, reward=r, next_state=s2)
