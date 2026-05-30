@@ -65,3 +65,51 @@ def test_novelty_bonus_zero_when_beta_zero():
     runner = _make_runner(bx_novelty_beta=0.0)
     runner._reset_novelty()
     assert runner._novelty_bonus((0, 0)) == 0.0
+
+
+def test_probe_descriptor_representation():
+    runner = _make_runner(bx_repr_oracle="scalar")
+    assert runner._probe_descriptor() == ("representation", "scalar")
+
+
+def test_probe_descriptor_exploration():
+    runner = _make_runner(bx_novelty_beta=0.1)
+    ptype, pstrength = runner._probe_descriptor()
+    assert ptype == "exploration"
+    assert "0.1" in pstrength
+
+
+def test_probe_descriptor_horizon():
+    runner = _make_runner(gamma=0.997)
+    ptype, pstrength = runner._probe_descriptor()
+    assert ptype == "horizon"
+    assert "0.997" in pstrength
+
+
+def test_probe_descriptor_baseline():
+    runner = _make_runner()
+    assert runner._probe_descriptor() == ("baseline", "none")
+
+
+def test_run_emits_structured_probe_log():
+    logs: list[str] = []
+    proc_cfg = ProceduralEnvConfig(mode="obstacles", max_rows=5, max_cols=5, max_steps=20)
+    gen = RandomObstaclesGenerator(
+        rows=5, cols=5, start=(0, 0), goal=(4, 4),
+        min_density=proc_cfg.min_density, max_density=proc_cfg.max_density, max_attempts=100,
+    )
+    env = ProceduralGridWorld(cfg=proc_cfg, generator=gen)
+    dqn_cfg = ConvRecurrentDQNConfig(
+        episodes=2, conv_channels=(8,), lstm_hidden=16, sequence_length=4,
+        replay_capacity=10, min_episodes_to_learn=1, batch_size=1,
+        max_steps_per_episode=20, eval_max_steps=20, eval_enabled=False,
+        bx_repr_oracle="scalar",
+    )
+    cb = RunnerCallbacks(on_log=lambda level, msg: logs.append(msg))
+    runner = ConvRecurrentProceduralDQNRunner(
+        env=env, proc_cfg=proc_cfg, dqn_cfg=dqn_cfg,
+        sched_cfg=SchedulerConfig(update_interval=1, step=0.05),
+        train_cfg=TrainingConfig(), callbacks=cb, device="cpu", seed=0,
+    )
+    runner.run()
+    assert any("BX_PROBE_RESULT" in m and "probe_type=representation" in m for m in logs)

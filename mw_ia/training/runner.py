@@ -655,6 +655,8 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
             self.best_tracker = None
 
         self._visit_counts: dict[tuple[int, int], int] = {}
+        self._diff_max: float = 0.0
+        self._ep_to_diff_030: int | None = None
 
     def _reset_novelty(self) -> None:
         """Reset la table de comptes de visites (debut d'episode / maze)."""
@@ -667,6 +669,16 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
             return 0.0
         self._visit_counts[cell] = self._visit_counts.get(cell, 0) + 1
         return beta / math.sqrt(self._visit_counts[cell])
+
+    def _probe_descriptor(self) -> tuple[str, str]:
+        """Identifie la sonde active pour le logging structure."""
+        if self.dqn_cfg.bx_repr_oracle != "none":
+            return "representation", self.dqn_cfg.bx_repr_oracle
+        if self.dqn_cfg.bx_novelty_beta > 0.0:
+            return "exploration", f"beta={self.dqn_cfg.bx_novelty_beta}"
+        if abs(self.dqn_cfg.gamma - 0.99) > 1e-9:
+            return "horizon", f"gamma={self.dqn_cfg.gamma}"
+        return "baseline", "none"
 
     def run(self) -> None:
         self.callbacks.fire_log(
@@ -686,6 +698,9 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                 return
 
             self.env.set_difficulty(self.scheduler.current)
+            self._diff_max = max(self._diff_max, self.scheduler.current)
+            if self._ep_to_diff_030 is None and self.scheduler.current >= 0.30:
+                self._ep_to_diff_030 = ep
             state, info = self.env.reset(seed=ep)
             maze = info["maze"]
             difficulty = info["difficulty"]
@@ -780,3 +795,13 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                     f"@ ep {self.best_tracker.best_episode}"
                     + ("  NEW BEST" if improved else "")
                 )
+        probe_type, probe_strength = self._probe_descriptor()
+        best_eval = (
+            self.best_tracker.best_winrate if self.best_tracker is not None else float("nan")
+        )
+        self.callbacks.fire_log(
+            "info",
+            f"BX_PROBE_RESULT probe_type={probe_type} probe_strength={probe_strength} "
+            f"diff_max={self._diff_max:.2f} ep_to_diff_0.30={self._ep_to_diff_030} "
+            f"best_eval_0.30={best_eval:.2%}"
+        )
