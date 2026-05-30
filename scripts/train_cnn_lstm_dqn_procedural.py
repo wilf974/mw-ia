@@ -104,6 +104,29 @@ def main() -> int:
                         help="V2-B1a : sliding window des N derniers bests (default 3).")
     parser.add_argument("--b1a-mix-ratio", type=float, default=0.2,
                         help="V2-B1a : fraction du batch venant du snapshot (default 0.2 = 20%%).")
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.99,
+        help="V2-BX Sonde A (horizon) : discount factor. Default 0.99. "
+             "Sonde A recommande : 0.997 (horizon effectif ~333, coherent max-steps 400).",
+    )
+    parser.add_argument(
+        "--bx-repr-oracle",
+        choices=("none", "scalar", "field"),
+        default="none",
+        help="V2-BX Sonde C (representation) : 4e canal oracle BFS. "
+             "none=baseline, scalar=C1 (plan uniforme distance agent), "
+             "field=C2 (champ distance par cellule). Default none.",
+    )
+    parser.add_argument(
+        "--bx-novelty-beta",
+        type=float,
+        default=0.0,
+        help="V2-BX Sonde B (exploration) : poids du bonus count-based "
+             "beta/sqrt(visits) par cellule/episode. Default 0.0 = desactive. "
+             "Point de depart recommande : 0.05 a 0.1.",
+    )
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(
@@ -147,6 +170,9 @@ def main() -> int:
         b1a_snapshot_size=args.b1a_snapshot_size,
         b1a_n_windows=args.b1a_n_windows,
         b1a_mix_ratio=args.b1a_mix_ratio,
+        gamma=args.gamma,
+        bx_repr_oracle=args.bx_repr_oracle,
+        bx_novelty_beta=args.bx_novelty_beta,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,
