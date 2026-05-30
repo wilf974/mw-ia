@@ -795,6 +795,7 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                     f"@ ep {self.best_tracker.best_episode}"
                     + ("  NEW BEST" if improved else "")
                 )
+        self._diff_max = max(self._diff_max, self.scheduler.current)
         probe_type, probe_strength = self._probe_descriptor()
         best_eval = (
             self.best_tracker.best_winrate if self.best_tracker is not None else float("nan")

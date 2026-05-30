@@ -113,3 +113,7 @@ def test_run_emits_structured_probe_log():
     )
     runner.run()
     assert any("BX_PROBE_RESULT" in m and "probe_type=representation" in m for m in logs)
+    bx_line = next(m for m in logs if "BX_PROBE_RESULT" in m)
+    assert "diff_max=" in bx_line
+    assert "ep_to_diff_0.30=" in bx_line
+    assert "best_eval_0.30=" in bx_line
