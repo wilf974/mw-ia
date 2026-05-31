@@ -131,13 +131,14 @@ def encode_procedural_observation_2d(
 ) -> np.ndarray:
     """Encode l'observation procédural pour ConvQNetwork (V2-Z).
 
-    Format : tensor 3D shape (3, max_rows, max_cols) float32 :
+    Format : tensor 3D shape (3 ou 4, max_rows, max_cols) float32 :
     - canal 0 : position agent one-hot (un seul 1 en (row, col))
     - canal 1 : obstacles (grid.astype(float32))
     - canal 2 : goal one-hot (un seul 1 en (goal_r, goal_c))
+    - canal 3 (optionnel) : distance BFS normalisée ou scalar si oracle_mode != "none"
 
     Pour les mazes plus petits que max_rows × max_cols, la grille est placée
-    top-left, les cellules hors maze restent à zéro sur les 3 canaux (cellules
+    top-left, les cellules hors maze restent à zéro sur les canaux 0-2 (cellules
     libres, pas d'obstacle, pas de goal). L'agent CNN voit des bordures
     artificielles qu'il apprend à ignorer.
 
@@ -147,9 +148,12 @@ def encode_procedural_observation_2d(
         goal: position (goal_r, goal_c) du goal dans max_rows × max_cols.
         max_rows: nombre de rangées max (dim du ConvQNetwork).
         max_cols: nombre de colonnes max.
+        oracle_mode: "none" (défaut, 3 canaux), "scalar" (4ᵉ canal = distance agent→goal),
+                     ou "field" (4ᵉ canal = champ de distance BFS normalisé).
 
     Returns:
-        np.ndarray[float32] de shape (3, max_rows, max_cols).
+        np.ndarray[float32] de shape (3 ou 4, max_rows, max_cols).
+        Shape est (3, ...) si oracle_mode="none", (4, ...) sinon.
     """
     rows, cols = grid.shape
     assert rows <= max_rows and cols <= max_cols, (
@@ -174,7 +178,6 @@ def encode_procedural_observation_2d(
             f"oracle_mode doit etre none|scalar|field, recu {oracle_mode}"
         )
 
-    rows, cols = grid.shape
     dist_norm = float(max_rows * max_cols)
     dist = bfs_distance_field(grid, goal=goal)  # (rows, cols), inf hors-atteignable
     # Normalisation + sentinelle 1.0 pour obstacle / non-atteignable.
