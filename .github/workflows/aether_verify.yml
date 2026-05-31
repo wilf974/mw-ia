@@ -80,13 +80,15 @@ jobs:
             --b1a --polyak-tau 0.005 --eval-every-episodes 5 \
             --best-checkpoint-path checkpoints/ci_v2b1a_polyak_best.pt
           test -f checkpoints/ci_v2b1a_polyak_best.pt
-      - name: Smoke V2-BX Sonde C (repr oracle scalar)
+      - name: Smoke test V2-BX Sonde C (repr oracle scalar)
         run: |
+          mkdir -p checkpoints
           python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles \
             --device cpu --max-rows 5 --max-cols 5 --max-steps 20 --sequence-length 10 \
             --no-eval --bx-repr-oracle scalar
-      - name: Smoke V2-BX Sonde B (novelty) + Polyak cohabit
+      - name: Smoke test V2-BX Sonde B (novelty) + Polyak cohabit
         run: |
+          mkdir -p checkpoints
           python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles \
             --device cpu --max-rows 5 --max-cols 5 --max-steps 20 --sequence-length 10 \
             --no-eval --bx-novelty-beta 0.1 --polyak-tau 0.005
