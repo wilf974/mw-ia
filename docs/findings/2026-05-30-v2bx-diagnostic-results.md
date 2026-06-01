@@ -39,18 +39,27 @@ Sonde B n=3 → < 0.45 → bottleneck plus profond
 
 | Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
 |---|---|---|---|
-| 0 | _(en cours)_ | | |
-| 1 | _(en cours)_ | | |
-| 2 | _(en cours)_ | | |
-| **moyenne** | **_(en cours)_** | | |
+| 0 | 0.30 | 50 % | 75 % @ 0.30 |
+| 1 | 0.40 | 50 % | 73 % @ 0.40 |
+| 2 | 0.35 | 50 % | 73 % @ 0.35 |
+| **moyenne** | **0.35** | 50 % | — |
 
-**Verdict C2 : _(à compléter)_**
+**Verdict C2 : NÉGATIF → représentation ÉLIMINÉE.** Moyenne `diff_max = 0.35`, au niveau de la baseline V2-U (0.36), bien sous le seuil 0.45. Réfutation forte : même le gradient de distance complet par cellule (suivable en greedy pur) ne casse pas le plafond. Le champ resserre légèrement la variance (tous seeds ≥ 0.30, best_eval uniforme 50 %) → l'info spatiale aide *marginalement la stabilité* mais **pas le plafond de difficulté**. → Sonde A.
 
 ---
 
 ## Sonde A — horizon (gamma=0.997) — n=3
 
-_(conditionnel : si C2 < 0.45)_
+> Horizon effectif `1/(1-0.997) ≈ 333`, cohérent avec `max_steps=400`. Teste si l'agent connaît les bons comportements mais propage mal la valeur sur les trajectoires longues.
+
+| Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
+|---|---|---|---|
+| 0 | _(en cours)_ | | |
+| 1 | _(en cours)_ | | |
+| 2 | _(en cours)_ | | |
+| **moyenne** | **_(en cours)_** | | |
+
+**Verdict A : _(à compléter)_**
 
 ---
 
