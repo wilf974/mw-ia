@@ -54,18 +54,27 @@ Sonde B n=3 → < 0.45 → bottleneck plus profond
 
 | Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
 |---|---|---|---|
+| 0 | 0.25 | 40 % | 77 % @ 0.25 |
+| 1 | 0.25 | 10 % | 73 % @ 0.25 |
+| 2 | 0.40 | 40 % | 80 % @ 0.40 |
+| **moyenne** | **0.30** | 30 % | — |
+
+**Verdict A : NÉGATIF → horizon écarté.** Moyenne `diff_max = 0.30`, sous la baseline V2-U (0.36), loin de 0.45. Pousser γ à 0.997 ne casse pas le plafond et **déstabilise** (seed 1 best_eval s'effondre à 10 %). L'hypothèse mécaniste « horizon effectif ~100 trop court vs max_steps=400 » est réfutée : l'allongement de l'horizon augmente la variance du bootstrap sans aider. Résultat clairement négatif (non ambigu) → option de réserve n-step NON déclenchée → Sonde B.
+
+---
+
+## Sonde B — exploration (novelty count-based, beta=0.1) — n=3
+
+> Bonus `beta/sqrt(visits)` par cellule/épisode. Exploration pure : n'aide pas une fois le goal trouvé. Teste si le chemin n'est simplement jamais découvert assez souvent.
+
+| Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
+|---|---|---|---|
 | 0 | _(en cours)_ | | |
 | 1 | _(en cours)_ | | |
 | 2 | _(en cours)_ | | |
 | **moyenne** | **_(en cours)_** | | |
 
-**Verdict A : _(à compléter)_**
-
----
-
-## Sonde B — exploration (novelty beta) — n=3
-
-_(conditionnel : si A < 0.45)_
+**Verdict B : _(à compléter)_**
 
 ---
 
