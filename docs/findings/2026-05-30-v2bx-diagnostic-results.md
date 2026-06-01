@@ -63,9 +63,22 @@ Sonde B n=3 → < 0.45 → bottleneck plus profond
 
 ---
 
-## Sonde B — exploration (novelty count-based, beta=0.1) — n=3
+## Sonde B — exploration (novelty count-based) — n=3
 
 > Bonus `beta/sqrt(visits)` par cellule/épisode. Exploration pure : n'aide pas une fois le goal trouvé. Teste si le chemin n'est simplement jamais découvert assez souvent.
+
+### B @ beta=0.1 — CONTAMINÉ (hyperparamètre trop grand)
+
+| Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
+|---|---|---|---|
+| 0 | 0.10 | 0 % | 0 % @ 0.00 |
+| 1 | 0.15 | 0 % | 0 % @ 0.00 |
+| 2 | 0.15 | 0 % | 3 % @ 0.00 |
+| **moyenne** | **0.13** | 0 % | — |
+
+**Non interprétable.** Pas un négatif propre : β=0.1 écrase l'objectif. Sur 15×15 (~225 cellules), explorer ~150 cases neuves rapporte `0.1 × 150 ≈ +15` vs **+1** pour le goal → ratio ~15:1, l'agent apprend à vagabonder (winrate ~0 %). Risque #1 de la spec (faux négatif par hyperparamètre). → re-test β=0.01.
+
+### B @ beta=0.01 — test propre
 
 | Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
 |---|---|---|---|
