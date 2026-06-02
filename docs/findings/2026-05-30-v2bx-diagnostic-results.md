@@ -78,7 +78,18 @@ Sonde B n=3 → < 0.45 → bottleneck plus profond
 
 **Non interprétable.** Pas un négatif propre : β=0.1 écrase l'objectif. Sur 15×15 (~225 cellules), explorer ~150 cases neuves rapporte `0.1 × 150 ≈ +15` vs **+1** pour le goal → ratio ~15:1, l'agent apprend à vagabonder (winrate ~0 %). Risque #1 de la spec (faux négatif par hyperparamètre). → re-test β=0.01.
 
-### B @ beta=0.01 — test propre
+### B @ beta=0.01 — test propre — POSITIF FAIBLE
+
+| Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
+|---|---|---|---|
+| 0 | 0.30 | 50 % | 81 % @ 0.30 |
+| 1 | 0.45 | 70 % | 62 % @ 0.45 |
+| 2 | 0.40 | 70 % | 74 % @ 0.40 |
+| **moyenne** | **0.383** | 63 % | — |
+
+**Positif faible.** Première et seule sonde **au-dessus de la baseline** (0.383 vs 0.36). 1 seed touche le seuil 0.45 ; best_eval 70 % sur 2/3 seeds (vs 64 % baseline). Frôle 0.45 sans le franchir en moyenne → second réglage β=0.02 (risque #1 spec : re-tune avant de conclure).
+
+### B @ beta=0.02 — second réglage
 
 | Seed | `diff_max` | best_eval @ diff=0.30 | final winrate / diff |
 |---|---|---|---|
@@ -87,7 +98,7 @@ Sonde B n=3 → < 0.45 → bottleneck plus profond
 | 2 | _(en cours)_ | | |
 | **moyenne** | **_(en cours)_** | | |
 
-**Verdict B : _(à compléter)_**
+**Verdict B final : _(à compléter)_**
 
 ---
 
