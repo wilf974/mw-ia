@@ -16,12 +16,13 @@ def test_mean_converges_scalar():
     assert abs(rms.std - 2.0) < 0.2
 
 
-def test_var_non_negative_single_samples():
+def test_var_converges_to_zero_on_identical_samples():
     rms = RunningMeanStd(shape=())
-    for x in (3.0, 3.0, 3.0):
-        rms.update(np.array([x]))
-    assert rms.var >= 0.0
-    assert rms.std >= 0.0
+    for _ in range(200):
+        rms.update(np.array([3.0]))
+    assert rms.var < 0.01       # variance collapses toward 0
+    assert rms.std >= 0.0       # std stays well-defined
+    assert abs(rms.mean - 3.0) < 0.05
 
 
 def test_vector_shape_tracked_elementwise():
@@ -29,7 +30,7 @@ def test_vector_shape_tracked_elementwise():
     batch = np.array([[1.0, 10.0], [3.0, 30.0]])
     rms.update(batch)
     assert rms.mean.shape == (2,)
-    assert rms.mean[1] > rms.mean[0]
+    assert np.allclose(rms.mean, [2.0, 20.0], atol=1e-3)
 
 
 def test_std_positive_after_init():
