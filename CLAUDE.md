@@ -39,7 +39,8 @@ La V2 "auto-amélioration" a été décomposée en 6 sous-projets séquentiels (
 | **V** | Training Protocol Stabilization (eval + best-checkpoint) | ✅ Livré (tag `v0.2.0-v`) |
 | **ZY** | CNN + LSTM + Double DQN combiné | ✅ Livré (tag `v0.2.0-zy`) |
 | **U** | Polyak soft target update | ✅ Livré (tag `v0.2.0-u`) |
-| **B** | Mémoire persistante cross-session | 🔬 En cours — B0 (PER) + B1a (snapshot rehearsal) livrés, **findings négatifs à 15×15** (tags `v0.2.0-b0`, `v0.2.0-b1a`). B2/autre piste à brainstormer. |
+| **B** | Mémoire persistante cross-session | 🔬 En cours — B0 (PER) + B1a (snapshot rehearsal) livrés, **findings négatifs à 15×15** (tags `v0.2.0-b0`, `v0.2.0-b1a`). |
+| **BX** | Diagnostic causal bottleneck 15×15 | ✅ Livré (tag `v0.2.0-bx`) — **bottleneck = EXPLORATION** (représentation + horizon éliminés par sondes-oracles). Prochain sous-projet : module d'exploration appris (ICM/RND). |
 | C | Évaluateur self-supervisé | Pas commencé |
 | D | Continual learning (EWC, rehearsal) | Pas commencé — préfiguré par bucket tracker V2-X |
 | E | Auto-modification (proposer/tester variants) | Pas commencé |
@@ -1680,12 +1681,38 @@ Pattern V2-B0 reproduit strict + factoriel 2×2 (B1a × PER) :
 
 **Note infra (non bloquant)** : le hook `claude-flow` peut émettre des erreurs `npx`/`npm-cache` (`ENOTEMPTY` sur `.claude`) sans rapport avec le code MW_IA. À traiter séparément si nécessaire, n'a pas bloqué le bench ni le tag.
 
+### V2-BX — diagnostic causal du bottleneck 15×15 (livraison 2026-06-06, tag `v0.2.0-bx`)
+
+**Sous-projet diagnostique** (pas une feature) : trancher par la mesure quelle famille est le bottleneck du régime 15×15 de V2-ZY+Polyak. Trois sondes-oracles jetables derrière flags `default=off` (no-op strict, baselines reproductibles), métrique primaire `diff_max` (plafond scheduler), seuil 0.45, n=3 par sonde. **384 tests verts** (356 + 28 BX). Code : 11 commits `427a8d7`→`3db23dc` (Tasks 1-9, subagent-driven, double revue). Spec/plan/findings : `docs/superpowers/{specs,plans}/2026-05-30-mw-ia-bx-diagnostic*.md`, `docs/findings/2026-05-30-v2bx-diagnostic-results.md`.
+
+**Composants** : `bfs_distance_field` (`maze_generators.py`), `encode_procedural_observation_2d(oracle_mode=...)` 4ᵉ canal (`procedural_env.py`), flags `bx_repr_oracle`/`bx_novelty_beta` (`config.py`), wiring + logging `BX_PROBE_RESULT` dans `ConvRecurrentProceduralDQNRunner` uniquement, CLI `--gamma`/`--bx-repr-oracle`/`--bx-novelty-beta`.
+
+**Résultats bench n=3 15×15** (baseline V2-U : diff_max 0.36, best_eval 64 %) :
+
+| Sonde | Famille | diff_max moy | best_eval moy | Verdict |
+|---|---|---|---|---|
+| C1 scalaire | représentation | 0.25 | 37 % | ❌ négatif (dilution) |
+| C2 champ BFS | représentation | 0.35 | 50 % | ❌ **ÉLIMINÉE** |
+| A γ=0.997 | horizon | 0.30 | 30 % | ❌ **ÉCARTÉ** (déstabilise) |
+| B β=0.1 | exploration | 0.13 | 0 % | ⚠️ contaminé (β trop grand) |
+| B β=0.01 | exploration | 0.383 | 63 % | ✅ positif faible |
+| B β=0.02 | exploration | 0.40 | 66.7 % | ✅ **positif faible confirmé** |
+
+**Verdict : le bottleneck 15×15 est l'EXPLORATION.** Représentation éliminée (même l'oracle spatial maximal C2 ne dépasse pas la baseline → l'info spatiale est déjà extractible). Horizon écarté (γ plus long déstabilise). Exploration = **seule famille au-dessus de la baseline** (diff_max 0.38–0.40, best_eval jusqu'à 66.7 %, 1 seed à 0.45), mais le count-based brut frôle sans franchir 0.45 (rendements décroissants 0.01→0.02, corruption à 0.1). Cohérent avec le pari a priori (exploration ~40 %).
+
+**Pièges/leçons V2-BX** :
+1. **Reward shaping mal calibré = faux négatif non interprétable** : B β=0.1 écrasait le goal reward ~15:1 (~150 cellules × 0.1 vs +1) → winrate 0 %. Toujours vérifier que le bonus cumulé reste sous-dominant au goal reward avant de conclure (risque #1 spec, re-test β=0.01/0.02).
+2. **Sonde C unifiée en 4ᵉ canal** (pas concat-pré-LSTM) : `in_channels 3→4`, `oracle_mode` threadé en training ET eval (via `functools.partial` sur l'encodeur du `PeriodicEvaluator`). C1 scalaire = plan uniforme, C2 = champ par cellule.
+3. **Petites grilles de smoke** : `--sequence-length ≤ max_steps` obligatoire (default 32 > max_steps 20 → ValueError). Sans objet à 15×15.
+
+**Prochaine étape (hors-scope BX, prochain sous-projet)** : module d'exploration **appris** — ICM (Pathak 2017), RND (Burda 2018, plus stable que count-based, pas de compromis de corruption raide), ou pseudo-counts en feature space. Cible : best @ diff=0.30 (V2-V n=5) ≥ 74 %, idéalement diff_max robustement > 0.45. Cycle complet brainstorm → spec → plan → impl.
+
 1. **Lire ce CLAUDE.md en entier.**
 2. **Smoke test rapide** :
    ```bash
    source .venv/Scripts/activate && pytest -q
    ```
-   Attendu : 356 passed (incluant V2-B0 + V2-B1a code livré, bench GPU pending). + `bash aether/verify_all.sh` → 8 OK.
+   Attendu : 384 passed (incluant V2-B0 + V2-B1a + V2-BX code livré). + `bash aether/verify_all.sh` → 8 OK.
 3. **Aligner avec l'utilisateur** sur le prochain sous-projet.
 4. **Cycle complet** pour tout nouveau sous-projet :
    - `superpowers:brainstorming` → cerner intent, scope, contraintes
@@ -1696,9 +1723,9 @@ Pattern V2-B0 reproduit strict + factoriel 2×2 (B1a × PER) :
 ### Si l'objectif est un quick fix / petite feature
 
 - TDD (test rouge → impl → vert → commit)
-- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy`, `v0.2.0-u`, `v0.2.0-b0`, `v0.2.0-b1a` (pas de force-push)
-- Re-lancer `pytest -q` avant chaque commit (attendu : 356 passed)
-- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`, `mw_ia/neural/conv_recurrent.py`, `mw_ia/agents/conv_recurrent_dqn.py`, `mw_ia/neural/sum_tree.py`, `mw_ia/neural/prioritized_sequence_buffer.py`, `mw_ia/training/snapshot_store.py`) sans raison documentée
+- Ne pas casser les tags `v0.1.0`, `v0.2.0-a`, `v0.2.0-x`, `v0.2.0-y`, `v0.2.0-z`, `v0.2.0-w`, `v0.2.0-v`, `v0.2.0-zy`, `v0.2.0-u`, `v0.2.0-b0`, `v0.2.0-b1a`, `v0.2.0-bx` (pas de force-push)
+- Re-lancer `pytest -q` avant chaque commit (attendu : 384 passed)
+- Ne pas toucher aux modules livrés (`mw_ia/guardrails/`, `aether/invariants/`, `mw_ia/envs/maze_generators.py`, `mw_ia/envs/procedural_env.py`, `mw_ia/training/scheduler.py`, `mw_ia/neural/recurrent.py`, `mw_ia/neural/sequence_buffer.py`, `mw_ia/neural/recurrent_trainer.py`, `mw_ia/agents/recurrent_dqn.py`, `mw_ia/neural/conv_network.py`, `mw_ia/agents/conv_dqn.py`, `mw_ia/neural/conv_recurrent.py`, `mw_ia/agents/conv_recurrent_dqn.py`, `mw_ia/neural/sum_tree.py`, `mw_ia/neural/prioritized_sequence_buffer.py`, `mw_ia/training/snapshot_store.py`) sans raison documentée. Les sondes V2-BX (4ᵉ canal oracle dans `procedural_env.py`, novelty/logging dans `runner.py`) sont jetables et derrière flags `default=off` ; ne pas s'appuyer dessus pour du code de production.
 
 ### Si l'objectif est de pousser un sous-projet V3+ (auto-modification, etc.)
 
