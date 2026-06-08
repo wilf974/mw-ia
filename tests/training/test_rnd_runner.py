@@ -56,3 +56,22 @@ def test_rnd_disabled_emits_no_rnd_result():
     runner = _make_runner(on_log=lambda level, msg: logs.append(msg), rnd_enabled=False)
     runner.run()
     assert not any("RND_RESULT" in m for m in logs)
+
+
+def test_rnd_ratio_warn_fires_once():
+    levels: list[str] = []
+    msgs: list[str] = []
+
+    def _log(level, msg):
+        levels.append(level)
+        msgs.append(msg)
+
+    # rnd_ratio_warn tres bas + beta eleve -> le ratio depasse vite le seuil.
+    runner = _make_runner(
+        on_log=_log,
+        rnd_enabled=True, rnd_warmup_steps=0, rnd_beta=5.0,
+        rnd_ratio_warn=1e-6,
+    )
+    runner.run()
+    warns = [m for lv, m in zip(levels, msgs) if lv == "warning" and "RND ratio" in m]
+    assert len(warns) == 1  # warn-once latch : exactement un warning sur tout le run

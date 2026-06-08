@@ -749,6 +749,8 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                 if self.rnd is not None:
                     bonus = self.rnd.compute_bonus(next_obs)
                     self._rnd_last_loss = self.rnd.update(next_obs)
+                    # r ici = extrinseque (+ bonus count-based si bx_novelty_beta>0,
+                    # = 0 par defaut en C0). Ratio = intrinseque RND / extrinseque.
                     self._rnd_ext_sum += abs(r)
                     self._rnd_int_sum += self.dqn_cfg.rnd_beta * bonus
                     r = r + self.dqn_cfg.rnd_beta * bonus
