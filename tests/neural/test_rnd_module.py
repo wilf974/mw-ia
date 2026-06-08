@@ -59,3 +59,17 @@ def test_predictor_is_trained():
         not torch.equal(b, p) for b, p in zip(before, mod.predictor.parameters())
     )
     assert changed
+
+
+def test_large_scale_obs_does_not_explode_bonus():
+    # Spec §6 : la normalisation (obs-clip [-5,5] + bonus running-std + clip)
+    # borne le bonus meme sur une obs a tres grande echelle.
+    mod = RNDModule(
+        in_channels=3, rows=4, cols=4, warmup_steps=0, clip=5.0, seed=0, device="cpu"
+    )
+    rng = np.random.RandomState(7)
+    for _ in range(20):  # calibrer les normaliseurs sur des obs normales
+        mod.compute_bonus(rng.rand(3, 4, 4).astype(np.float32))
+    huge = rng.rand(3, 4, 4).astype(np.float32) * 1e6
+    b = mod.compute_bonus(huge)
+    assert 0.0 <= b <= mod.clip + 1e-6

@@ -56,8 +56,13 @@ class RNDModule:
         device: str = "cpu",
         seed: int = 0,
     ) -> None:
-        torch.manual_seed(seed)
         self.device = torch.device(device)
+        # Seed local : on sauvegarde/restaure le RNG torch global pour que la
+        # construction seedee de RND ne deplace PAS le flux RNG de l'agent
+        # (construit avant RND dans le runner). Garantit un A/B --rnd vs --no-rnd
+        # non contamine. RND reste deterministe par seed en interne.
+        _rng_state = torch.get_rng_state()
+        torch.manual_seed(seed)
         # target construite en premier, predictor ensuite -> inits aleatoires distinctes
         self.target = _RNDNet(
             in_channels=in_channels, rows=rows, cols=cols, embed_dim=embed_dim
@@ -65,6 +70,7 @@ class RNDModule:
         self.predictor = _RNDNet(
             in_channels=in_channels, rows=rows, cols=cols, embed_dim=embed_dim
         ).to(self.device)
+        torch.set_rng_state(_rng_state)
         for p in self.target.parameters():
             p.requires_grad_(False)
         self.optimizer = torch.optim.Adam(self.predictor.parameters(), lr=lr)
