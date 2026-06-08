@@ -41,3 +41,13 @@ def test_negative_warmup_rejected():
 def test_non_positive_embed_rejected():
     with pytest.raises(ValueError, match="rnd_embed_dim"):
         ConvRecurrentDQNConfig(rnd_embed_dim=0)
+
+
+def test_non_positive_lr_rejected():
+    with pytest.raises(ValueError, match="rnd_lr"):
+        ConvRecurrentDQNConfig(rnd_lr=0.0)
+
+
+def test_non_positive_ratio_warn_rejected():
+    with pytest.raises(ValueError, match="rnd_ratio_warn"):
+        ConvRecurrentDQNConfig(rnd_ratio_warn=0.0)
