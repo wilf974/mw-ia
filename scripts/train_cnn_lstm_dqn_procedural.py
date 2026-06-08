@@ -127,6 +127,27 @@ def main() -> int:
              "beta/sqrt(visits) par cellule/episode. Default 0.0 = desactive. "
              "Point de depart recommande : 0.05 a 0.1.",
     )
+    parser.add_argument(
+        "--rnd",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="V2-C0 : exploration intrinseque RND (single-stream, bonus appris "
+             "ajoute au reward). Default False = pas de bonus.",
+    )
+    parser.add_argument("--rnd-beta", type=float, default=0.5,
+                        help="V2-C0 : coefficient du bonus RND (default 0.5).")
+    parser.add_argument("--rnd-lr", type=float, default=1e-4,
+                        help="V2-C0 : learning rate du predictor RND (default 1e-4).")
+    parser.add_argument("--rnd-embed-dim", type=int, default=128,
+                        help="V2-C0 : dim de l'embedding target/predictor (default 128).")
+    parser.add_argument("--rnd-clip", type=float, default=5.0,
+                        help="V2-C0 : plafond per-step du bonus normalise (default 5.0).")
+    parser.add_argument("--rnd-warmup-steps", type=int, default=1000,
+                        help="V2-C0 : pas ou le bonus reste 0 le temps que les "
+                             "normaliseurs se calent (default 1000).")
+    parser.add_argument("--rnd-ratio-warn", type=float, default=10.0,
+                        help="V2-C0 : seuil de WARN du ratio intrinsec/extrinsec "
+                             "(default 10.0).")
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(
@@ -173,6 +194,13 @@ def main() -> int:
         gamma=args.gamma,
         bx_repr_oracle=args.bx_repr_oracle,
         bx_novelty_beta=args.bx_novelty_beta,
+        rnd_enabled=args.rnd,
+        rnd_beta=args.rnd_beta,
+        rnd_lr=args.rnd_lr,
+        rnd_embed_dim=args.rnd_embed_dim,
+        rnd_clip=args.rnd_clip,
+        rnd_warmup_steps=args.rnd_warmup_steps,
+        rnd_ratio_warn=args.rnd_ratio_warn,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,
