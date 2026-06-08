@@ -431,6 +431,15 @@ class ConvRecurrentDQNConfig:
     bx_repr_oracle: str = "none"   # "none" | "scalar" (C1) | "field" (C2)
     bx_novelty_beta: float = 0.0   # bonus exploration count-based (Sonde B)
 
+    # V2-C0 : RND exploration intrinseque (single-stream, default = no-op)
+    rnd_enabled: bool = False
+    rnd_beta: float = 0.5
+    rnd_lr: float = 1e-4
+    rnd_embed_dim: int = 128
+    rnd_clip: float = 5.0
+    rnd_warmup_steps: int = 1000
+    rnd_ratio_warn: float = 10.0
+
     # V2-V : Training Protocol Stabilization (activé par défaut V2-ZY)
     eval_enabled: bool = True
     eval_every_episodes: int = 100
@@ -540,3 +549,17 @@ class ConvRecurrentDQNConfig:
             raise ValueError(
                 f"bx_novelty_beta doit etre >= 0, recu {self.bx_novelty_beta}"
             )
+        if self.rnd_beta < 0.0:
+            raise ValueError(f"rnd_beta doit etre >= 0, recu {self.rnd_beta}")
+        if self.rnd_lr <= 0.0:
+            raise ValueError(f"rnd_lr doit etre > 0, recu {self.rnd_lr}")
+        if self.rnd_embed_dim <= 0:
+            raise ValueError(f"rnd_embed_dim doit etre > 0, recu {self.rnd_embed_dim}")
+        if self.rnd_clip <= 0.0:
+            raise ValueError(f"rnd_clip doit etre > 0, recu {self.rnd_clip}")
+        if self.rnd_warmup_steps < 0:
+            raise ValueError(
+                f"rnd_warmup_steps doit etre >= 0, recu {self.rnd_warmup_steps}"
+            )
+        if self.rnd_ratio_warn <= 0.0:
+            raise ValueError(f"rnd_ratio_warn doit etre > 0, recu {self.rnd_ratio_warn}")
