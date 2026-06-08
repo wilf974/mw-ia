@@ -20,6 +20,7 @@ from mw_ia.agents.recurrent_dqn import RecurrentDQNAgent
 from mw_ia.config import ConvDQNConfig, ConvRecurrentDQNConfig, DQNConfig, DRQNConfig, ProceduralEnvConfig, QLearningConfig, SchedulerConfig, TrainingConfig
 from mw_ia.envs.gridworld import GridWorld
 from mw_ia.envs.procedural_env import ProceduralGridWorld, encode_procedural_observation, encode_procedural_observation_2d
+from mw_ia.neural.rnd import RNDModule
 from mw_ia.training.checkpoint_tracker import BestCheckpointTracker
 from mw_ia.training.evaluator import PeriodicEvaluator
 from mw_ia.training.metrics import DifficultyBucketTracker, MetricsTracker
@@ -657,6 +658,19 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
         self._visit_counts: dict[tuple[int, int], int] = {}
         self._diff_max: float = 0.0
         self._ep_to_diff_030: int | None = None
+        if dqn_cfg.rnd_enabled:
+            self.rnd: RNDModule | None = RNDModule(
+                in_channels=in_channels, rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
+                embed_dim=dqn_cfg.rnd_embed_dim, lr=dqn_cfg.rnd_lr,
+                clip=dqn_cfg.rnd_clip, warmup_steps=dqn_cfg.rnd_warmup_steps,
+                device=device, seed=seed,
+            )
+        else:
+            self.rnd = None
+        self._rnd_int_sum: float = 0.0
+        self._rnd_ext_sum: float = 0.0
+        self._rnd_last_loss: float = 0.0
+        self._rnd_warned: bool = False
 
     def _reset_novelty(self) -> None:
         """Reset la table de comptes de visites (debut d'episode / maze)."""
@@ -732,6 +746,23 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
                     max_rows=self.proc_cfg.max_rows, max_cols=self.proc_cfg.max_cols,
                     oracle_mode=self.dqn_cfg.bx_repr_oracle,
                 )
+                if self.rnd is not None:
+                    bonus = self.rnd.compute_bonus(next_obs)
+                    self._rnd_last_loss = self.rnd.update(next_obs)
+                    self._rnd_ext_sum += abs(r)
+                    self._rnd_int_sum += self.dqn_cfg.rnd_beta * bonus
+                    r = r + self.dqn_cfg.rnd_beta * bonus
+                    if (
+                        not self._rnd_warned
+                        and self._rnd_ext_sum > 0.0
+                        and self._rnd_int_sum / self._rnd_ext_sum > self.dqn_cfg.rnd_ratio_warn
+                    ):
+                        self._rnd_warned = True
+                        self.callbacks.fire_log(
+                            "warning",
+                            f"RND ratio int/ext > {self.dqn_cfg.rnd_ratio_warn} "
+                            f"(run potentiellement contamine)",
+                        )
                 self.agent.observe(obs, a, r, next_obs, terminated or truncated)
                 self.callbacks.fire_step(state=state, action=a, reward=r, next_state=s2)
                 state = s2
@@ -806,3 +837,12 @@ class ConvRecurrentProceduralDQNRunner(_BaseRunner):
             f"diff_max={self._diff_max:.2f} ep_to_diff_0.30={self._ep_to_diff_030} "
             f"best_eval_0.30={best_eval:.2%}"
         )
+        if self.rnd is not None:
+            ratio = (
+                self._rnd_int_sum / self._rnd_ext_sum if self._rnd_ext_sum > 0.0 else 0.0
+            )
+            self.callbacks.fire_log(
+                "info",
+                f"RND_RESULT rnd_beta={self.dqn_cfg.rnd_beta} "
+                f"ratio_int_ext={ratio:.3f} predictor_loss={self._rnd_last_loss:.4f}",
+            )
