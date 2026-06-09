@@ -25,7 +25,22 @@
 
 ---
 
-## RND β=0.1 — n=3
+## RND β=0.1 — n=3 — ÉCHEC
+
+| Seed | `diff_max` | best_eval @ 0.30 | ratio int/ext | final |
+|---|---|---|---|---|
+| 0 | 0.05 | 0 % | 0.44 | 100 % @ 0.05 |
+| 1 | 0.05 | 0 % | 0.53 | 50 % @ 0.05 |
+| 2 | 0.05 | 0 % | 0.41 | 0 % @ 0.00 |
+| **moyenne** | **0.05** | **0 %** | ~0.46 | — |
+
+**ÉCHEC.** Ratio tombé (1.3 → 0.46) mais `diff_max` reste collé à 0.05, best_eval 0 % partout. Le bonus dense **supprime le signal de winrate** du scheduler → l'agent chasse la nouveauté, la winrate ne tient pas 80 %, le scheduler reste bloqué à 0.05. `predictor_loss=0.0000` → predictor converge instantanément → bonus normalisé = bruit O(1) persistant. → dernier point β=0.02 (magnitude du count-based gagnant).
+
+---
+
+## RND β=0.02 — n=3 (point décisif)
+
+> Magnitude effective du count-based gagnant (B@0.02). Si RND échoue même là, c'est la NATURE du bonus (global appris vs épisodique per-maze), pas sa magnitude.
 
 | Seed | `diff_max` | best_eval @ 0.30 | ratio int/ext | final |
 |---|---|---|---|---|
@@ -34,10 +49,10 @@
 | 2 | _(en cours)_ | | | |
 | **moyenne** | **_(en cours)_** | | | |
 
-**Verdict β=0.1 : _(à compléter)_**
+**Verdict β=0.02 : _(à compléter)_**
 
 ---
 
 ## Finding consolidé
 
-_(à compléter une fois le re-tune parcouru)_
+_(à compléter une fois le sweep β parcouru)_
