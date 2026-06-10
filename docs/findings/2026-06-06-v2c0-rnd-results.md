@@ -42,17 +42,34 @@
 
 > Magnitude effective du count-based gagnant (B@0.02). Si RND échoue même là, c'est la NATURE du bonus (global appris vs épisodique per-maze), pas sa magnitude.
 
+| Seed | `diff_max` | best_eval @ 0.30 | ratio int/ext | predictor_loss |
+|---|---|---|---|---|
+| 0 | 0.05 | 0 % | 0.163 | 0.0000 |
+| 1 | 0.05 | 0 % | 0.164 | 0.0000 |
+| 2 | 0.05 | 0 % | 0.149 | 0.0000 |
+| **moyenne** | **0.05** | **0 %** | ~0.16 | — |
+
+**Verdict β=0.02 : ÉCHEC** — identique aux β=0.5 et 0.1. À la magnitude exacte du count-based gagnant (B@0.02 : 0.40 / 66.7 %), RND reste collé à diff_max=0.05, best_eval 0 % partout.
+
+**⚠️ Réserve méthodologique avant conclusion** : 9/9 runs donnent exactement le même diff_max=0.05 **indépendamment de β** (0.5 → 0.02, ratio 1.3 → 0.16). Si le mécanisme était réellement « bonus dense qui noie le goal », on attendrait une transition progressive (β=0.5 catastrophe, β=0.02 dégradé mais vivant). L'invariance totale au sweep évoque plutôt : plomberie, normalisation qui annule l'effet du sweep, interaction scheduler, ou bug conceptuel du bonus. Le no-op strict a été vérifié avec `--no-rnd`, jamais avec `--rnd` à β quasi-nul.
+
+---
+
+## RND β=0.001 — run contrôle falsifiant (n=2, seeds 0-1)
+
+> Question : **le système revient-il vers la baseline (0.36 / 64 %) quand β → 0 ?**
+> - Si oui → mécanisme « poison dense » confirmé continu en β → finding « RND lifelong négatif propre » → clôture C0 → V2-C1.
+> - Si diff_max reste à 0.05 → **implémentation RND suspecte** → audit obligatoire avant toute conclusion scientifique.
+
 | Seed | `diff_max` | best_eval @ 0.30 | ratio int/ext | final |
 |---|---|---|---|---|
 | 0 | _(en cours)_ | | | |
 | 1 | _(en cours)_ | | | |
-| 2 | _(en cours)_ | | | |
-| **moyenne** | **_(en cours)_** | | | |
 
-**Verdict β=0.02 : _(à compléter)_**
+**Verdict contrôle : _(à compléter)_**
 
 ---
 
 ## Finding consolidé
 
-_(à compléter une fois le sweep β parcouru)_
+_(à compléter une fois le run contrôle β=0.001 terminé)_
