@@ -7,7 +7,9 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-pytest.importorskip("PyQt6")
+# importorskip sur le SOUS-module : sur Linux headless, "import PyQt6" passe
+# mais QtWidgets echoue (libEGL absente) -> doit skipper, pas crasher.
+pytest.importorskip("PyQt6.QtWidgets", reason="suite complete : requiert PyQt6 + libs graphiques")
 from PyQt6.QtWidgets import QApplication
 
 
