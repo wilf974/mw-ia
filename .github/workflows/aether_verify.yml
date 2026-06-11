@@ -21,6 +21,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e .
       - name: Run pytest
         run: pytest -q
       - name: Smoke test procedural training
