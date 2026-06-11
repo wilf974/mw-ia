@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 import torch
 
 from mw_ia.agents.recurrent_dqn import RecurrentDQNAgent

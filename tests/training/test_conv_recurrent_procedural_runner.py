@@ -4,6 +4,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 from mw_ia.config import (
     ConvRecurrentDQNConfig, ProceduralEnvConfig, SchedulerConfig, TrainingConfig,
 )

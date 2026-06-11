@@ -1,6 +1,10 @@
 """Tests d'integration V2-BX runner : wiring oracle + nouveaute + logging."""
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 from mw_ia.config import (
     ConvRecurrentDQNConfig, ProceduralEnvConfig, SchedulerConfig, TrainingConfig,
 )
