@@ -251,6 +251,12 @@ class ConvDQNConfig:
     train_every: int = 4
     use_amp: bool = True
     double_dqn: bool = True   # V2-W : Hasselt 2015. False = V2-Z baseline DQN classique.
+    # V2-V : Training Protocol Stabilization (eval périodique + best-checkpoint)
+    eval_enabled: bool = True
+    eval_every_episodes: int = 100
+    eval_seeds: tuple[int, ...] = tuple(range(10_000, 10_010))
+    eval_max_steps: int = 200
+    best_checkpoint_path: str | None = None
     episodes: int = 5_000
     max_steps_per_episode: int = 200
 
@@ -299,3 +305,11 @@ class ConvDQNConfig:
             raise ValueError(
                 f"max_steps_per_episode doit être > 0, reçu {self.max_steps_per_episode}"
             )
+        if self.eval_every_episodes <= 0:
+            raise ValueError(
+                f"eval_every_episodes doit être > 0, reçu {self.eval_every_episodes}"
+            )
+        if len(self.eval_seeds) == 0:
+            raise ValueError("eval_seeds ne peut pas être vide")
+        if self.eval_max_steps <= 0:
+            raise ValueError(f"eval_max_steps doit être > 0, reçu {self.eval_max_steps}")
