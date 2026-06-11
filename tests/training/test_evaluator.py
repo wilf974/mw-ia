@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import numpy as np
 
+import pytest
+
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 from mw_ia.agents.conv_dqn import ConvDQNAgent
 from mw_ia.config import ConvDQNConfig, ProceduralEnvConfig
 from mw_ia.envs.maze_generators import RandomObstaclesGenerator

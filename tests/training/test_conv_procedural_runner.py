@@ -6,6 +6,10 @@ from typing import Any
 
 import numpy as np
 
+import pytest
+
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 from mw_ia.config import (
     ConvDQNConfig, ProceduralEnvConfig, SchedulerConfig, TrainingConfig,
 )

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import pytest
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 import torch
 
 from mw_ia.neural.network import QNetwork

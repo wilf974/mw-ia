@@ -1,6 +1,10 @@
 """Tests TrainingRunner via callbacks (sans Qt)."""
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 from mw_ia.config import DQNConfig, GridWorldConfig, QLearningConfig, TrainingConfig
 from mw_ia.envs.gridworld import GridWorld
 from mw_ia.training.runner import DQNRunner, RunnerCallbacks, TabularRunner

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch", reason="suite complete : requiert torch")
 
 
 @pytest.fixture

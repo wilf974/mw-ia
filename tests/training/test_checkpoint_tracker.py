@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("torch", reason="suite complete : requiert torch")
+
 from mw_ia.agents.conv_dqn import ConvDQNAgent
 from mw_ia.config import ConvDQNConfig
 from mw_ia.training.checkpoint_tracker import BestCheckpointTracker
