@@ -41,3 +41,15 @@ def test_drqn_config_replay_capacity_zero_raises():
 def test_drqn_config_epsilon_inverted_raises():
     with pytest.raises(ValueError, match="epsilon"):
         DRQNConfig(epsilon_start=0.1, epsilon_end=0.9)
+
+
+def test_drqn_polyak_tau_default_and_validation() -> None:
+    """V2-U : default polyak_tau=0.0, validation dans [0, 1]."""
+    cfg = DRQNConfig()
+    assert cfg.polyak_tau == 0.0
+    cfg2 = DRQNConfig(polyak_tau=0.005)
+    assert cfg2.polyak_tau == 0.005
+    with pytest.raises(ValueError):
+        DRQNConfig(polyak_tau=-0.001)
+    with pytest.raises(ValueError):
+        DRQNConfig(polyak_tau=1.001)

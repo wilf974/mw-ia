@@ -85,3 +85,69 @@ def test_smoke_10_episodes_no_nan() -> None:
     assert all(math.isfinite(l) for l in losses), f"loss non-finite : {losses}"
     wr = runner.metrics.winrate()
     assert 0.0 <= wr <= 1.0
+
+
+def test_runner_periodic_assessment_saves_best(tmp_path: Any) -> None:
+    """V2-V : runner avec assessment activé sauvegarde best-checkpoint."""
+    from mw_ia.training.runner import ConvProceduralDQNRunner
+
+    env = _build_env()
+    proc_cfg = ProceduralEnvConfig(mode="obstacles", max_rows=10, max_cols=10,
+                                   min_density=0.0, max_density=0.20)
+    best_path = tmp_path / "best.pt"
+    dqn_cfg = ConvDQNConfig(
+        episodes=200, max_steps_per_episode=30,
+        batch_size=8, min_replay_to_learn=8, train_every=1,
+        epsilon_decay_steps=200, target_sync_steps=50,
+        replay_capacity=500, use_amp=False,
+        eval_enabled=True,
+        eval_every_episodes=50,
+        eval_seeds=(10_000, 10_001, 10_002),
+        eval_max_steps=30,
+        best_checkpoint_path=str(best_path),
+    )
+    sched_cfg = SchedulerConfig(initial_difficulty=0.0)
+    train_cfg = TrainingConfig(log_every_episodes=100)
+
+    assessment_count = [0]
+
+    def on_assessment(**kw: object) -> None:
+        assessment_count[0] += 1
+
+    cb = RunnerCallbacks(on_eval=on_assessment)
+    runner = ConvProceduralDQNRunner(
+        env=env, proc_cfg=proc_cfg, dqn_cfg=dqn_cfg, sched_cfg=sched_cfg,
+        train_cfg=train_cfg, callbacks=cb, device="cpu", seed=0,
+    )
+    runner.run()
+
+    assert assessment_count[0] >= 3, f"expected >=3 assessments, got {assessment_count[0]}"
+    assert best_path.exists(), "best_checkpoint .pt manquant sur disque"
+    assert runner.best_tracker is not None
+    assert runner.best_tracker.best_winrate >= 0.0
+
+
+def test_runner_assessment_disabled_no_evaluator(tmp_path: Any) -> None:
+    """V2-V : runner avec eval_enabled=False n'instancie pas l'evaluator."""
+    from mw_ia.training.runner import ConvProceduralDQNRunner
+
+    env = _build_env()
+    proc_cfg = ProceduralEnvConfig(mode="obstacles", max_rows=10, max_cols=10,
+                                   min_density=0.0, max_density=0.20)
+    dqn_cfg = ConvDQNConfig(
+        episodes=10, max_steps_per_episode=30,
+        batch_size=8, min_replay_to_learn=8, train_every=1,
+        epsilon_decay_steps=200, target_sync_steps=50,
+        replay_capacity=500, use_amp=False,
+        eval_enabled=False,
+    )
+    sched_cfg = SchedulerConfig(initial_difficulty=0.0)
+    train_cfg = TrainingConfig(log_every_episodes=100)
+
+    runner = ConvProceduralDQNRunner(
+        env=env, proc_cfg=proc_cfg, dqn_cfg=dqn_cfg, sched_cfg=sched_cfg,
+        train_cfg=train_cfg, callbacks=RunnerCallbacks(), device="cpu", seed=0,
+    )
+    assert runner.evaluator is None
+    assert runner.best_tracker is None
+    runner.run()

@@ -99,3 +99,28 @@ def test_end_episode_triggers_train_after_min_episodes():
     # Au 6e épisode (>= min_episodes_to_learn=5), train step déclenché
     assert "loss" in metrics
     assert agent.last_loss is not None
+
+
+def test_v2y_polyak_tau_skips_hard_sync() -> None:
+    """V2-U : V2-Y agent avec polyak_tau > 0 skip hard sync périodique."""
+    cfg = DRQNConfig(
+        polyak_tau=0.005,
+        target_sync_steps=2,
+        min_episodes_to_learn=10_000,  # disable train_step
+        use_amp=False,
+        sequence_length=4,
+        max_steps_per_episode=8,
+    )
+    agent = RecurrentDQNAgent(
+        obs_dim=200, n_actions=4, cfg=cfg, device="cpu", seed=0,
+    )
+    obs = np.zeros(200, dtype=np.float32)
+    # Simuler 5 épisodes courts
+    for _ in range(5):
+        agent.reset_hidden()
+        agent.begin_episode()
+        for _ in range(4):
+            agent.observe(obs, action=0, reward=0.0, next_state=obs, done=False)
+        agent.end_episode()
+    # target_syncs jamais incrémenté
+    assert agent.target_syncs == 0

@@ -55,6 +55,44 @@ def maze_bfs_check(
     return False
 
 
+def bfs_distance_field(
+    grid: np.ndarray, *, goal: tuple[int, int]
+) -> np.ndarray:
+    """Distance geodesique BFS 4-connexe de chaque cellule au goal.
+
+    Args:
+        grid: tableau (rows, cols) de booleens. True = obstacle.
+        goal: (row, col) du goal (doit etre libre).
+
+    Returns:
+        np.ndarray[float64] (rows, cols) : nombre de pas du plus court chemin
+        4-connexe de chaque cellule au goal en evitant les obstacles.
+        goal = 0.0 ; cellules-obstacle et cellules non-atteignables = np.inf.
+
+    Raises:
+        AssertionError: si goal hors grille ou sur un obstacle.
+    """
+    rows, cols = grid.shape
+    gr, gc = goal
+    assert 0 <= gr < rows and 0 <= gc < cols, f"goal {goal} hors grille {grid.shape}"
+    assert not grid[gr, gc], f"goal {goal} sur obstacle"
+
+    dist = np.full((rows, cols), np.inf, dtype=np.float64)
+    dist[gr, gc] = 0.0
+    queue: deque[tuple[int, int]] = deque([goal])
+    while queue:
+        r, c = queue.popleft()
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            nr, nc = r + dr, c + dc
+            if not (0 <= nr < rows and 0 <= nc < cols):
+                continue
+            if grid[nr, nc] or np.isfinite(dist[nr, nc]):
+                continue
+            dist[nr, nc] = dist[r, c] + 1.0
+            queue.append((nr, nc))
+    return dist
+
+
 @dataclass(frozen=True)
 class RandomObstaclesGenerator:
     """Generator par placement aléatoire d'obstacles avec BFS-check.

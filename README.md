@@ -328,6 +328,211 @@ branche conditionnelle dans `_ConvDQNTrainer.step()`, exposition CLI via
 Le bouton "Démarrer (procedural CNN)" utilise `ConvDQNConfig()` par défaut, donc
 V2-W (Double DQN) est activé automatiquement. Pas de nouveau bouton.
 
+## V2-V — Training Protocol Stabilization (sous-projet livré)
+
+**Tag** : `v0.2.0-v` — **Tests** : 230 verts (211 baseline + 19 V2-V)
+
+Motivation : H1 confirmée 2026-05-23 — sur V2-W seed 4, le winrate passe de 1 % (ep=5000) à 71 % (ep=3000). Le pipeline "train until end" est cassé : on jette littéralement le meilleur agent entraîné.
+
+V2-V ajoute :
+- **Évaluation périodique greedy** sur 10 seeds eval séparés du training (seeds 10000-10009)
+- **Best-checkpoint tracking** : sauvegarde automatique du modèle au pic d'eval_winrate
+
+### Usage CLI
+
+```bash
+# V2-V par défaut (eval activé, sans sauvegarde disque)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+
+# Avec sauvegarde du best-checkpoint
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --best-checkpoint-path checkpoints/v2v_best_seed0.pt
+
+# Reproduire baseline pre-V2-V (sans eval)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda --no-eval
+```
+
+### Architecture
+
+- `mw_ia/training/evaluator.py::PeriodicEvaluator` — env eval séparé, méthode `evaluate(agent, difficulty)` qui ne pollue ni le buffer ni le scheduler
+- `mw_ia/training/checkpoint_tracker.py::BestCheckpointTracker` — sauvegarde au pic d'eval_winrate (idempotent, path=None = tracking en mémoire)
+- `ConvDQNConfig` étendu : `eval_enabled`, `eval_every_episodes`, `eval_seeds`, `eval_max_steps`, `best_checkpoint_path`
+- `ConvProceduralDQNRunner` intègre evaluator + tracker via `eval_enabled=True`
+
+### Overhead
+
+~10 % de temps d'entraînement en plus (10 seeds eval × 200 max_steps / 100 ép training = ~100 ms / ép). Compensation : récupération du best-model qui aurait été détruit par le late-stage collapse.
+
+## V2-ZY — CNN + LSTM + Double DQN combiné (sous-projet livré)
+
+**Tag** : `v0.2.0-zy` — **Tests** : 252 verts (231 baseline + 21 V2-ZY)
+
+Combo des 3 leviers livrés : perception spatiale (V2-Z Conv2D), mémoire temporelle (V2-Y LSTM), stabilité Q-target (V2-W Double DQN). Validé via V2-V eval rigoureux.
+
+### Usage CLI
+
+```bash
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --best-checkpoint-path checkpoints/v2zy_best_seed0.pt
+```
+
+### Architecture
+
+- `mw_ia/neural/conv_recurrent.py::ConvRecurrentQNetwork` — `Conv → Flatten → LSTM → FC` (Hausknecht-style)
+- `mw_ia/agents/conv_recurrent_dqn.py::ConvRecurrentDQNAgent` — hidden state runtime maintenu, pattern V2-Y
+- `mw_ia/neural/recurrent_trainer.py::RecurrentDQNTrainer` (V2-Y) étendu avec flag `double_dqn`
+- `mw_ia/training/runner.py::ConvRecurrentProceduralDQNRunner` — intègre V2-V eval+best-checkpoint
+- `mw_ia/training/evaluator.py::PeriodicEvaluator` (V2-V) étendu avec duck-typing `agent.begin_episode()` pour reset hidden state entre rollouts eval
+
+### Critère succès cible
+
+4/5 seeds avec `best_checkpoint @ diff=0.30 ≥ 70 %` en eval rigoureux V2-V.
+
+## V2-U — Polyak soft target update (sous-projet livré)
+
+**Tag** : `v0.2.0-u` — **Tests** : 265 verts (252 baseline + 13 V2-U)
+
+Sous-projet pour stabiliser V2-ZY (variance inter-seed 38 pp → cible < 20 pp) sans dégrader la capacité maximale.
+
+### Hypothèse
+
+Remplacer hard sync target tous les N steps par soft Polyak update `target ← τ × online + (1−τ) × target` à chaque train_step avec τ ≈ 0.005. Devrait réduire les oscillations target Q et stabiliser Conv+LSTM+BPTT.
+
+### Usage CLI (opt-in via `--polyak-tau`)
+
+```bash
+# V2-ZY + Polyak (recommandé)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --polyak-tau 0.005 \
+    --best-checkpoint-path checkpoints/v2u_best_seed0.pt
+
+# V2-W + Polyak (validation transverse)
+python scripts/train_cnn_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --polyak-tau 0.005
+
+# Baseline (V2-W/V2-Y/V2-ZY actuel : hard sync)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda
+```
+
+### Architecture
+
+- Champ `polyak_tau: float = 0.0` ajouté à `ConvDQNConfig`, `DRQNConfig`, `ConvRecurrentDQNConfig`. Default 0.0 = hard sync (backwards compat strict).
+- Méthode `polyak_update(tau)` ajoutée à `_ConvDQNTrainer` (V2-Z/W) et `RecurrentDQNTrainer` (V2-Y/ZY). Mix in-place via `mul_().add_()` sur `parameters()` itération.
+- Branche conditionnelle dans `step()` post-optimizer : `if self.polyak_tau > 0.0: self.polyak_update(self.polyak_tau)`.
+- Agents skip le hard sync périodique si `cfg.polyak_tau > 0` (évite double-update).
+
+### Critère succès
+
+Variance inter-seed best @ diff=0.30 sur V2-ZY+Polyak n=5 **< 20 pp** (vs 38 pp baseline V2-ZY).
+
+## V2-B0 — Trajectory-level Prioritized Experience Replay (code livré, bench pending)
+
+**Tests** : 323 verts (265 baseline + 58 V2-B0). **Tag** : `v0.2.0-b0` prévu après bench n=5.
+
+Sous-projet B phase 0 : Prioritized Experience Replay (Schaul 2015 + R2D2 2019) trajectoire-level sur `SequenceReplayBuffer` V2-Y. Contrôle scientifique avant B1 (policy snapshot rehearsal) et B2 (episodic memory).
+
+### Hypothèse
+
+Le replay uniforme est-il un bottleneck du régime stable V2-ZY+Polyak (mean 92 % @ 10×10, 64 % @ 15×15) ? PER trajectoire-level avec priorité = `(|td| + ε)^α`, IS correction annealée `β: 0.4 → 1.0`, aggregation R2D2 `η × max + (1−η) × mean` par trajectoire.
+
+### Usage CLI (opt-in via `--per`)
+
+```bash
+# V2-ZY + Polyak + PER 10x10 (sanity / no-regression)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --polyak-tau 0.005 --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b0_10x10_seed0.pt
+
+# V2-ZY + Polyak + PER 15x15 (test scientifique principal)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b0_15x15_seed0.pt
+
+# Baseline V2-ZY+Polyak (sans PER) : ne pas passer --per
+```
+
+### Hyperparams V2-B0 (défauts littéraires)
+
+| Flag CLI | Default | Source |
+|---|---|---|
+| `--per-alpha` | 0.6 | Schaul et al. 2015 |
+| `--per-beta-start` | 0.4 | Schaul et al. 2015 |
+| `--per-beta-end` | 1.0 | Annealing complet |
+| `--per-eta` | 0.9 | Kapturowski et al. 2019 (R2D2) |
+| `--per-epsilon` | 1e-6 | Priority floor |
+| `--max-attempts-bfs` | 100 (recommandé bench : **500**) | Pre-mitigation piège #10 V2-X |
+
+### Architecture
+
+- `SumTree` O(log N) avec padding interne pow2 — `mw_ia/neural/sum_tree.py`
+- `PrioritizedSequenceReplayBuffer` (sampling stratifié + IS normalisé par max) + `BetaScheduler` — `mw_ia/neural/prioritized_sequence_buffer.py`
+- `RecurrentDQNTrainer.step_with_priorities` (IS-weighted loss + R2D2 priority aggregation hors autocast)
+- Branche conditionnelle dans `RecurrentDQNAgent` (V2-Y) et `ConvRecurrentDQNAgent` (V2-ZY) : `cfg.per_enabled` default `False` → backwards compat strict.
+
+### Critère succès (bench n=5 same-seed pattern V2-U)
+
+**10×10 — no-regression** : mean ≥ 85 %, std ≤ 20 pp, 0/5 collapse, diff_max ≥ 0.5.
+
+**15×15 — test scientifique** : au moins 1 critère parmi {mean > 64 %, min > 50 %, médiane ep_to_best < baseline médiane, diff_max > 0.36}.
+
+## V2-B1a — Policy Snapshot Rehearsal (livré, finding NÉGATIF)
+
+**Tests** : 356 verts (323 baseline + 33 V2-B1a). **Tag** : `v0.2.0-b1a` posé (2026-05-29). **Verdict** : finding négatif — B1a ne renverse pas la pathologie de scaling 15×15 (cf. bench plus bas).
+
+Sous-projet B phase 1a : Policy Snapshot Rehearsal sur `SequenceReplayBuffer` V2-Y / V2-ZY. Lecture causale du finding V2-B0 phase-dependence : PER trajectoire-level aide à 10×10 (+6 pp) mais dégrade à 15×15 (−18 pp). Hypothèse B1a alternative : préserver les trajectoires near-frontier capturées au moment du best eval V2-V — sliding window FIFO de N captures × snapshot_size trajectoires immutable — suffit-il à éviter forgetting et améliorer V2-ZY+Polyak 15×15 sans la pathologie scaling de PER ?
+
+### Hypothèse
+
+Quand `BestCheckpointTracker.update()` retourne True (nouveau best eval V2-V), capturer K trajectoires successful (`terminated AND total_reward > 0`) du buffer dans un `SnapshotTrajectoryStore` immutable. À chaque `end_episode()`, mixer 80 % batch principal + 20 % snapshot sample uniforme. Filtre succès strict garantit que rehearsal pousse vers comportements gagnants. Sliding window FIFO préserve diversité curriculum (3 derniers bests).
+
+### Usage CLI (opt-in via `--b1a`)
+
+```bash
+# V2-ZY + Polyak + B1a 15x15 (Bras 3 — test scientifique principal)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --b1a --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b1a_15x15_seed0.pt
+
+# V2-ZY + Polyak + B1a + PER 15x15 (Bras 4 — factoriel 2x2)
+python scripts/train_cnn_lstm_dqn_procedural.py --episodes 5000 --mode obstacles --device cuda \
+    --seed 0 --max-rows 15 --max-cols 15 --max-steps 400 --replay-capacity 2500 \
+    --polyak-tau 0.005 --b1a --per --max-attempts-bfs 500 \
+    --best-checkpoint-path checkpoints/v2b1a_per_15x15_seed0.pt
+
+# Baseline V2-ZY+Polyak (sans B1a) : ne pas passer --b1a
+```
+
+### Hyperparams V2-B1a (défauts spec)
+
+| Flag CLI | Default | Source |
+|---|---|---|
+| `--b1a-snapshot-size` | 50 | Spec section 4.2 (size capture) |
+| `--b1a-n-windows` | 3 | Sliding window FIFO 3 derniers bests |
+| `--b1a-mix-ratio` | 0.2 | 80/20 mix sample-time |
+
+### Architecture
+
+- `SnapshotTrajectoryStore` (sliding window FIFO immutable, pré-allocation numpy) — `mw_ia/training/snapshot_store.py`
+- `concat_batchseq` helper sample-time mix — `mw_ia/neural/sequence_buffer.py`
+- Branche conditionnelle dans `RecurrentDQNAgent` (V2-Y) et `ConvRecurrentDQNAgent` (V2-ZY) : `cfg.b1a_enabled` default `False` → backwards compat strict V2-U / V2-B0
+- Hook `agent.on_new_best()` appelé par `ConvRecurrentProceduralDQNRunner` (V2-ZY) après `best_tracker.update()` retourne True. **Asymétrie intentionnelle MVP** : V2-Y agent expose l'API mais runner V2-Y n'a pas de hook (bench cible exclusif V2-ZY).
+- Orthogonal V2-U Polyak et V2-B0 PER : 4 combinaisons (B1a × PER) cohabitent (`_sample_training_batch` gère les 4 branches).
+
+### Bench n=5 same-seed 15×15 — factoriel 2×2 (2026-05-29, finding NÉGATIF)
+
+10 runs ep=5000 GPU via `scripts/bench_v2b1a.sh`, eval V2-V best @ diff=0.30 fixe. Synthèse :
+
+|  | **PER off** | **PER on** |
+|---|---|---|
+| **B1a off** | **64 %** (baseline V2-U) | 46 % (V2-B0) |
+| **B1a on** | **54 %** (Bras 3, −10 pp) | 48 % (Bras 4, −16 pp) |
+
+**Bras 3 (B1a seul)** : 0/4 critères atteints (mean 54 %, min 40 %, ep_to_best tardif ~4799, diff_max 0.35). **Bras 4 (B1a+PER)** : 48 % ≈ PER seul → l'interaction n'annule pas la pathologie de scaling. Aucun collapse tardif sur les 10 seeds (Polyak fait son travail).
+
+**Verdict** : à 15×15 (régime actif), **ni la priorisation du sampling (PER) ni le rehearsal de trajectoires réussies (B1a)** n'améliorent V2-ZY+Polyak. B1a montre que le bottleneck **n'est PAS la perte de trajectoires réussies récentes** — le problème est plus profond (représentation, exploration long-horizon, horizon/curriculum, modèle interne). Deux familles de remédiations éliminées sans ambiguïté. Détails complets dans `CLAUDE.md`.
+
 ## Roadmap (V2+)
 
 Architecture pensée pour ajouter sans refonte :

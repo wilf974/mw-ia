@@ -94,3 +94,29 @@ def test_eval_validation() -> None:
         ConvDQNConfig(eval_seeds=())
     with pytest.raises(ValueError):
         ConvDQNConfig(eval_max_steps=0)
+
+
+def test_eval_target_difficulty_default_and_validation() -> None:
+    """V2-V fix : default 0.30, validation [0, 1]."""
+    cfg = ConvDQNConfig()
+    assert cfg.eval_target_difficulty == 0.30
+    cfg2 = ConvDQNConfig(eval_target_difficulty=0.50)
+    assert cfg2.eval_target_difficulty == 0.50
+    with pytest.raises(ValueError):
+        ConvDQNConfig(eval_target_difficulty=-0.1)
+    with pytest.raises(ValueError):
+        ConvDQNConfig(eval_target_difficulty=1.1)
+
+
+def test_polyak_tau_default_and_validation() -> None:
+    """V2-U : default polyak_tau=0.0, validation dans [0, 1]."""
+    cfg = ConvDQNConfig()
+    assert cfg.polyak_tau == 0.0
+    cfg2 = ConvDQNConfig(polyak_tau=0.005)
+    assert cfg2.polyak_tau == 0.005
+    cfg3 = ConvDQNConfig(polyak_tau=1.0)
+    assert cfg3.polyak_tau == 1.0
+    with pytest.raises(ValueError):
+        ConvDQNConfig(polyak_tau=-0.001)
+    with pytest.raises(ValueError):
+        ConvDQNConfig(polyak_tau=1.001)

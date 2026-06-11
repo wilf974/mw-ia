@@ -91,6 +91,9 @@ class ProceduralEnvConfig:
     min_size: int = 4                   # mode maze uniquement
     max_size: int = 20
     max_attempts_bfs: int = 100         # mode obstacles : tentatives avant RuntimeError
+    max_steps: int = 200                # truncation per épisode du GridWorld interne
+                                        # (normalisation d'horizon quand la grille scale :
+                                        #  10x10 → 200, 15x15 → 400, 20x20 → 600-800)
 
     def __post_init__(self) -> None:
         if self.mode not in ("obstacles", "maze"):
@@ -106,6 +109,8 @@ class ProceduralEnvConfig:
             )
         if self.max_attempts_bfs <= 0:
             raise ValueError(f"max_attempts_bfs doit être > 0, reçu {self.max_attempts_bfs}")
+        if self.max_steps <= 0:
+            raise ValueError(f"max_steps doit être > 0, reçu {self.max_steps}")
 
 
 @dataclass(frozen=True)
@@ -170,6 +175,21 @@ class DRQNConfig:
     epsilon_decay_steps: int = 200_000  # default V2-X gagnant
     target_sync_steps: int = 1_000
     use_amp: bool = True
+    polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak (Lillicrap 2015).
+
+    # V2-B0 : Prioritized Experience Replay trajectory-level (Schaul 2015 + R2D2)
+    per_enabled: bool = False
+    per_alpha: float = 0.6              # priority exponent (Schaul 2015)
+    per_beta_start: float = 0.4         # IS exponent initial
+    per_beta_end: float = 1.0           # IS exponent final
+    per_eta: float = 0.9                # R2D2 aggregation : eta*max + (1-eta)*mean
+    per_epsilon: float = 1e-6           # small constant garantit priority > 0
+
+    # V2-B1a : Policy Snapshot Rehearsal (sliding window N captures x snapshot_size traj)
+    b1a_enabled: bool = False
+    b1a_snapshot_size: int = 50      # nombre de trajectoires capturees par best
+    b1a_n_windows: int = 3           # sliding window FIFO
+    b1a_mix_ratio: float = 0.2       # fraction du batch venant du snapshot
 
     # Training
     episodes: int = 5_000
@@ -218,6 +238,32 @@ class DRQNConfig:
             raise ValueError(
                 f"max_steps_per_episode doit être > 0, reçu {self.max_steps_per_episode}"
             )
+        if not (0.0 <= self.polyak_tau <= 1.0):
+            raise ValueError(
+                f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
+            )
+        if not (0.0 <= self.per_alpha <= 1.0):
+            raise ValueError(f"per_alpha doit etre dans [0, 1], recu {self.per_alpha}")
+        if not (0.0 <= self.per_beta_start <= 1.0):
+            raise ValueError(
+                f"per_beta_start doit etre dans [0, 1], recu {self.per_beta_start}"
+            )
+        if not (0.0 <= self.per_beta_end <= 1.0):
+            raise ValueError(
+                f"per_beta_end doit etre dans [0, 1], recu {self.per_beta_end}"
+            )
+        if not (0.0 <= self.per_eta <= 1.0):
+            raise ValueError(f"per_eta doit etre dans [0, 1], recu {self.per_eta}")
+        if self.per_epsilon <= 0.0:
+            raise ValueError(f"per_epsilon doit etre > 0, recu {self.per_epsilon}")
+        if self.b1a_snapshot_size <= 0:
+            raise ValueError(f"b1a_snapshot_size doit etre > 0, recu {self.b1a_snapshot_size}")
+        if self.b1a_n_windows <= 0:
+            raise ValueError(f"b1a_n_windows doit etre > 0, recu {self.b1a_n_windows}")
+        if not (0.0 < self.b1a_mix_ratio < 1.0):
+            raise ValueError(
+                f"b1a_mix_ratio doit etre dans ]0, 1[, recu {self.b1a_mix_ratio}"
+            )
 
 
 @dataclass(frozen=True)
@@ -251,11 +297,16 @@ class ConvDQNConfig:
     train_every: int = 4
     use_amp: bool = True
     double_dqn: bool = True   # V2-W : Hasselt 2015. False = V2-Z baseline DQN classique.
+    polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak (Lillicrap 2015).
     # V2-V : Training Protocol Stabilization (eval périodique + best-checkpoint)
     eval_enabled: bool = True
     eval_every_episodes: int = 100
     eval_seeds: tuple[int, ...] = tuple(range(10_000, 10_010))
     eval_max_steps: int = 200
+    # V2-V fix : eval à diff FIXE (pas scheduler.current). Sans ça, le best
+    # capture l'agent trivial à diff=0.00 (winrate 100% sur mazes vides) et
+    # n'est jamais battu par l'agent compétent à diff supérieure.
+    eval_target_difficulty: float = 0.30
     best_checkpoint_path: str | None = None
     episodes: int = 5_000
     max_steps_per_episode: int = 200
@@ -313,3 +364,202 @@ class ConvDQNConfig:
             raise ValueError("eval_seeds ne peut pas être vide")
         if self.eval_max_steps <= 0:
             raise ValueError(f"eval_max_steps doit être > 0, reçu {self.eval_max_steps}")
+        if not (0.0 <= self.eval_target_difficulty <= 1.0):
+            raise ValueError(
+                f"eval_target_difficulty doit être ∈ [0,1], reçu {self.eval_target_difficulty}"
+            )
+        if not (0.0 <= self.polyak_tau <= 1.0):
+            raise ValueError(
+                f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
+            )
+
+
+@dataclass(frozen=True)
+class ConvRecurrentDQNConfig:
+    """V2-ZY : Conv2D + LSTM + Double DQN combiné, avec V2-V eval activé.
+
+    Combo des 3 leviers livrés V2-Z (perception spatiale), V2-Y (mémoire),
+    V2-W (Double DQN). Réseau ConvRecurrentQNetwork, buffer SequenceReplayBuffer
+    V2-Y, trainer RecurrentDQNTrainer V2-Y étendu avec flag double_dqn.
+
+    Champs combinés V2-Y DRQNConfig + V2-Z ConvDQNConfig + V2-W double_dqn + V2-V eval_*.
+    """
+
+    # Conv-spécifique (V2-Z pattern)
+    conv_channels: tuple[int, ...] = (32, 64)
+    kernel_size: int = 3
+    padding: int = 1
+
+    # LSTM (V2-Y pattern)
+    lstm_hidden: int = 128
+    sequence_length: int = 32
+
+    # Replay (TRAJECTOIRES, pas transitions — V2-Y pattern)
+    replay_capacity: int = 5_000
+    min_episodes_to_learn: int = 100
+    train_steps_per_episode: int = 4
+
+    # Optimisation
+    batch_size: int = 128
+    lr: float = 1e-3
+    gamma: float = 0.99
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.05
+    epsilon_decay_steps: int = 200_000
+    target_sync_steps: int = 1_000
+    use_amp: bool = True
+
+    # V2-W : Double DQN activé par défaut V2-ZY (combo des 3 leviers)
+    double_dqn: bool = True
+    polyak_tau: float = 0.0   # V2-U : 0.0 = hard sync, >0 = soft Polyak.
+
+    # V2-B0 : Prioritized Experience Replay trajectory-level (Schaul 2015 + R2D2)
+    per_enabled: bool = False
+    per_alpha: float = 0.6
+    per_beta_start: float = 0.4
+    per_beta_end: float = 1.0
+    per_eta: float = 0.9
+    per_epsilon: float = 1e-6
+
+    # V2-B1a : Policy Snapshot Rehearsal (sliding window N captures x snapshot_size traj)
+    b1a_enabled: bool = False
+    b1a_snapshot_size: int = 50
+    b1a_n_windows: int = 3
+    b1a_mix_ratio: float = 0.2
+
+    # V2-BX : sondes-oracles diagnostiques (jetables, default = no-op)
+    bx_repr_oracle: str = "none"   # "none" | "scalar" (C1) | "field" (C2)
+    bx_novelty_beta: float = 0.0   # bonus exploration count-based (Sonde B)
+
+    # V2-C0 : RND exploration intrinseque (single-stream, default = no-op)
+    rnd_enabled: bool = False
+    rnd_beta: float = 0.5
+    rnd_lr: float = 1e-4
+    rnd_embed_dim: int = 128
+    rnd_clip: float = 5.0
+    rnd_warmup_steps: int = 1000
+    rnd_ratio_warn: float = 10.0
+
+    # V2-V : Training Protocol Stabilization (activé par défaut V2-ZY)
+    eval_enabled: bool = True
+    eval_every_episodes: int = 100
+    eval_seeds: tuple[int, ...] = tuple(range(10_000, 10_010))
+    eval_max_steps: int = 200
+    eval_target_difficulty: float = 0.30
+    best_checkpoint_path: str | None = None
+
+    # Training
+    episodes: int = 5_000
+    max_steps_per_episode: int = 200
+
+    def __post_init__(self) -> None:
+        if len(self.conv_channels) == 0:
+            raise ValueError("conv_channels ne peut pas être vide")
+        if any(c <= 0 for c in self.conv_channels):
+            raise ValueError(
+                f"conv_channels doivent être > 0, reçu {self.conv_channels}"
+            )
+        if self.kernel_size <= 0:
+            raise ValueError(f"kernel_size doit être > 0, reçu {self.kernel_size}")
+        if self.padding < 0:
+            raise ValueError(f"padding doit être >= 0, reçu {self.padding}")
+        if self.lstm_hidden <= 0:
+            raise ValueError(f"lstm_hidden doit être > 0, reçu {self.lstm_hidden}")
+        if not (1 <= self.sequence_length <= self.max_steps_per_episode):
+            raise ValueError(
+                f"sequence_length {self.sequence_length} hors [1, {self.max_steps_per_episode}]"
+            )
+        if self.replay_capacity <= 0:
+            raise ValueError(f"replay_capacity doit être > 0, reçu {self.replay_capacity}")
+        if self.min_episodes_to_learn <= 0:
+            raise ValueError(
+                f"min_episodes_to_learn doit être > 0, reçu {self.min_episodes_to_learn}"
+            )
+        if self.train_steps_per_episode <= 0:
+            raise ValueError(
+                f"train_steps_per_episode doit être > 0, reçu {self.train_steps_per_episode}"
+            )
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size doit être > 0, reçu {self.batch_size}")
+        if self.lr <= 0:
+            raise ValueError(f"lr doit être > 0, reçu {self.lr}")
+        if not (0.0 < self.gamma < 1.0):
+            raise ValueError(f"gamma doit être ∈ (0,1), reçu {self.gamma}")
+        if not (0.0 <= self.epsilon_end <= self.epsilon_start <= 1.0):
+            raise ValueError(
+                f"epsilon invalide : start={self.epsilon_start}, end={self.epsilon_end}"
+            )
+        if self.epsilon_decay_steps <= 0:
+            raise ValueError(
+                f"epsilon_decay_steps doit être > 0, reçu {self.epsilon_decay_steps}"
+            )
+        if self.target_sync_steps <= 0:
+            raise ValueError(
+                f"target_sync_steps doit être > 0, reçu {self.target_sync_steps}"
+            )
+        if self.eval_every_episodes <= 0:
+            raise ValueError(
+                f"eval_every_episodes doit être > 0, reçu {self.eval_every_episodes}"
+            )
+        if len(self.eval_seeds) == 0:
+            raise ValueError("eval_seeds ne peut pas être vide")
+        if self.eval_max_steps <= 0:
+            raise ValueError(f"eval_max_steps doit être > 0, reçu {self.eval_max_steps}")
+        if not (0.0 <= self.eval_target_difficulty <= 1.0):
+            raise ValueError(
+                f"eval_target_difficulty doit être ∈ [0,1], reçu {self.eval_target_difficulty}"
+            )
+        if self.episodes <= 0:
+            raise ValueError(f"episodes doit être > 0, reçu {self.episodes}")
+        if self.max_steps_per_episode <= 0:
+            raise ValueError(
+                f"max_steps_per_episode doit être > 0, reçu {self.max_steps_per_episode}"
+            )
+        if not (0.0 <= self.polyak_tau <= 1.0):
+            raise ValueError(
+                f"polyak_tau doit être ∈ [0, 1], reçu {self.polyak_tau}"
+            )
+        if not (0.0 <= self.per_alpha <= 1.0):
+            raise ValueError(f"per_alpha doit etre dans [0, 1], recu {self.per_alpha}")
+        if not (0.0 <= self.per_beta_start <= 1.0):
+            raise ValueError(
+                f"per_beta_start doit etre dans [0, 1], recu {self.per_beta_start}"
+            )
+        if not (0.0 <= self.per_beta_end <= 1.0):
+            raise ValueError(
+                f"per_beta_end doit etre dans [0, 1], recu {self.per_beta_end}"
+            )
+        if not (0.0 <= self.per_eta <= 1.0):
+            raise ValueError(f"per_eta doit etre dans [0, 1], recu {self.per_eta}")
+        if self.per_epsilon <= 0.0:
+            raise ValueError(f"per_epsilon doit etre > 0, recu {self.per_epsilon}")
+        if self.b1a_snapshot_size <= 0:
+            raise ValueError(f"b1a_snapshot_size doit etre > 0, recu {self.b1a_snapshot_size}")
+        if self.b1a_n_windows <= 0:
+            raise ValueError(f"b1a_n_windows doit etre > 0, recu {self.b1a_n_windows}")
+        if not (0.0 < self.b1a_mix_ratio < 1.0):
+            raise ValueError(
+                f"b1a_mix_ratio doit etre dans ]0, 1[, recu {self.b1a_mix_ratio}"
+            )
+        if self.bx_repr_oracle not in ("none", "scalar", "field"):
+            raise ValueError(
+                f"bx_repr_oracle doit etre none|scalar|field, recu {self.bx_repr_oracle}"
+            )
+        if self.bx_novelty_beta < 0.0:
+            raise ValueError(
+                f"bx_novelty_beta doit etre >= 0, recu {self.bx_novelty_beta}"
+            )
+        if self.rnd_beta < 0.0:
+            raise ValueError(f"rnd_beta doit etre >= 0, recu {self.rnd_beta}")
+        if self.rnd_lr <= 0.0:
+            raise ValueError(f"rnd_lr doit etre > 0, recu {self.rnd_lr}")
+        if self.rnd_embed_dim <= 0:
+            raise ValueError(f"rnd_embed_dim doit etre > 0, recu {self.rnd_embed_dim}")
+        if self.rnd_clip <= 0.0:
+            raise ValueError(f"rnd_clip doit etre > 0, recu {self.rnd_clip}")
+        if self.rnd_warmup_steps < 0:
+            raise ValueError(
+                f"rnd_warmup_steps doit etre >= 0, recu {self.rnd_warmup_steps}"
+            )
+        if self.rnd_ratio_warn <= 0.0:
+            raise ValueError(f"rnd_ratio_warn doit etre > 0, recu {self.rnd_ratio_warn}")

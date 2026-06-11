@@ -36,6 +36,77 @@ jobs:
         run: |
           python scripts/train_cnn_dqn_procedural.py --episodes 10 --mode obstacles --device cpu
           python scripts/train_cnn_dqn_procedural.py --episodes 10 --mode maze --device cpu
+      - name: Smoke test V2-V eval + best-checkpoint
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_dqn_procedural.py --episodes 10 --mode obstacles --device cpu --eval-every-episodes 5 --best-checkpoint-path checkpoints/ci_v2v_best.pt
+          test -f checkpoints/ci_v2v_best.pt
+      - name: Smoke test V2-ZY CNN + LSTM + Double DQN
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles --device cpu --eval-every-episodes 5 --best-checkpoint-path checkpoints/ci_v2zy_best.pt
+          test -f checkpoints/ci_v2zy_best.pt
+      - name: Smoke test V2-U Polyak soft target on V2-ZY
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles --device cpu --polyak-tau 0.005 --eval-every-episodes 5 --best-checkpoint-path checkpoints/ci_v2u_best.pt
+          test -f checkpoints/ci_v2u_best.pt
+      - name: Smoke test V2-B0 PER (trajectory-level) on V2-ZY
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py \
+            --episodes 10 --mode obstacles --device cpu \
+            --per --eval-every-episodes 5 \
+            --best-checkpoint-path checkpoints/ci_v2b0_best.pt
+          test -f checkpoints/ci_v2b0_best.pt
+      - name: Smoke test V2-B0 PER + Polyak cohabit (sanity check)
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py \
+            --episodes 10 --mode obstacles --device cpu \
+            --per --polyak-tau 0.005 --eval-every-episodes 5 \
+            --best-checkpoint-path checkpoints/ci_v2b0_polyak_best.pt
+          test -f checkpoints/ci_v2b0_polyak_best.pt
+      - name: Smoke test V2-B1a Policy Snapshot Rehearsal on V2-ZY
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py \
+            --episodes 10 --mode obstacles --device cpu \
+            --b1a --eval-every-episodes 5 \
+            --best-checkpoint-path checkpoints/ci_v2b1a_best.pt
+          test -f checkpoints/ci_v2b1a_best.pt
+      - name: Smoke test V2-B1a + Polyak cohabit (sanity check)
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py \
+            --episodes 10 --mode obstacles --device cpu \
+            --b1a --polyak-tau 0.005 --eval-every-episodes 5 \
+            --best-checkpoint-path checkpoints/ci_v2b1a_polyak_best.pt
+          test -f checkpoints/ci_v2b1a_polyak_best.pt
+      - name: Smoke test V2-BX Sonde C (repr oracle scalar)
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles \
+            --device cpu --max-rows 5 --max-cols 5 --max-steps 20 --sequence-length 10 \
+            --no-eval --bx-repr-oracle scalar
+      - name: Smoke test V2-BX Sonde B (novelty) + Polyak cohabit
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles \
+            --device cpu --max-rows 5 --max-cols 5 --max-steps 20 --sequence-length 10 \
+            --no-eval --bx-novelty-beta 0.1 --polyak-tau 0.005
+      - name: Smoke test V2-C0 RND (single-stream)
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles \
+            --device cpu --max-rows 5 --max-cols 5 --max-steps 20 --sequence-length 10 \
+            --no-eval --rnd --rnd-warmup-steps 0
+      - name: Smoke test V2-C0 RND + Polyak cohabit
+        run: |
+          mkdir -p checkpoints
+          python scripts/train_cnn_lstm_dqn_procedural.py --episodes 10 --mode obstacles \
+            --device cpu --max-rows 5 --max-cols 5 --max-steps 20 --sequence-length 10 \
+            --no-eval --rnd --rnd-warmup-steps 0 --polyak-tau 0.005
 
   aether-files:
     runs-on: ubuntu-latest

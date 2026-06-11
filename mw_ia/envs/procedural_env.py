@@ -7,6 +7,7 @@ import numpy as np
 
 from mw_ia.config import GridWorldConfig, ProceduralEnvConfig
 from mw_ia.envs.gridworld import Action, GridWorld
+from mw_ia.envs.maze_generators import bfs_distance_field
 
 
 class MazeGenerator(Protocol):
@@ -54,6 +55,7 @@ class ProceduralGridWorld:
             rows=rows, cols=cols,
             start=self.start, goal=goal,
             obstacles=obstacles,
+            max_steps=self.cfg.max_steps,
         )
         self._inner = GridWorld(gw_cfg)
         state, _ = self._inner.reset()
@@ -125,16 +127,18 @@ def encode_procedural_observation_2d(
     goal: tuple[int, int],
     max_rows: int,
     max_cols: int,
+    oracle_mode: str = "none",
 ) -> np.ndarray:
     """Encode l'observation procédural pour ConvQNetwork (V2-Z).
 
-    Format : tensor 3D shape (3, max_rows, max_cols) float32 :
+    Format : tensor 3D shape (3 ou 4, max_rows, max_cols) float32 :
     - canal 0 : position agent one-hot (un seul 1 en (row, col))
     - canal 1 : obstacles (grid.astype(float32))
     - canal 2 : goal one-hot (un seul 1 en (goal_r, goal_c))
+    - canal 3 (optionnel) : distance BFS normalisée ou scalar si oracle_mode != "none"
 
     Pour les mazes plus petits que max_rows × max_cols, la grille est placée
-    top-left, les cellules hors maze restent à zéro sur les 3 canaux (cellules
+    top-left, les cellules hors maze restent à zéro sur les canaux 0-2 (cellules
     libres, pas d'obstacle, pas de goal). L'agent CNN voit des bordures
     artificielles qu'il apprend à ignorer.
 
@@ -144,9 +148,12 @@ def encode_procedural_observation_2d(
         goal: position (goal_r, goal_c) du goal dans max_rows × max_cols.
         max_rows: nombre de rangées max (dim du ConvQNetwork).
         max_cols: nombre de colonnes max.
+        oracle_mode: "none" (défaut, 3 canaux), "scalar" (4ᵉ canal = distance agent→goal),
+                     ou "field" (4ᵉ canal = champ de distance BFS normalisé).
 
     Returns:
-        np.ndarray[float32] de shape (3, max_rows, max_cols).
+        np.ndarray[float32] de shape (3 ou 4, max_rows, max_cols).
+        Shape est (3, ...) si oracle_mode="none", (4, ...) sinon.
     """
     rows, cols = grid.shape
     assert rows <= max_rows and cols <= max_cols, (
@@ -163,4 +170,24 @@ def encode_procedural_observation_2d(
     obs[0, state[0], state[1]] = 1.0
     obs[1, :rows, :cols] = grid.astype(np.float32)
     obs[2, goal[0], goal[1]] = 1.0
-    return obs
+
+    if oracle_mode == "none":
+        return obs
+    if oracle_mode not in ("scalar", "field"):
+        raise ValueError(
+            f"oracle_mode doit etre none|scalar|field, recu {oracle_mode}"
+        )
+
+    dist_norm = float(max_rows * max_cols)
+    dist = bfs_distance_field(grid, goal=goal)  # (rows, cols), inf hors-atteignable
+    # Normalisation + sentinelle 1.0 pour obstacle / non-atteignable.
+    norm_field = np.where(np.isfinite(dist), dist / dist_norm, 1.0)
+    norm_field = np.clip(norm_field, 0.0, 1.0).astype(np.float32)
+
+    oracle_chan = np.ones((max_rows, max_cols), dtype=np.float32)  # padding = 1.0
+    if oracle_mode == "field":
+        oracle_chan[:rows, :cols] = norm_field
+    else:  # scalar : plan uniforme = distance de l'agent au goal
+        oracle_chan[:] = norm_field[state[0], state[1]]
+
+    return np.concatenate([obs, oracle_chan[np.newaxis, :, :]], axis=0)

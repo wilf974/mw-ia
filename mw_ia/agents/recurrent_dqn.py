@@ -4,6 +4,7 @@ Voir spec : docs/superpowers/specs/2026-05-22-mw-ia-recurrent-network-design.md 
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +13,22 @@ import torch
 
 from mw_ia.agents.base import Agent
 from mw_ia.config import DRQNConfig
+from mw_ia.neural.prioritized_sequence_buffer import (
+    BetaScheduler,
+    PrioritizedSequenceReplayBuffer,
+)
 from mw_ia.neural.recurrent import RecurrentQNetwork
 from mw_ia.neural.recurrent_trainer import RecurrentDQNTrainer
-from mw_ia.neural.sequence_buffer import SequenceReplayBuffer
+from mw_ia.neural.sequence_buffer import BatchSeq, SequenceReplayBuffer, concat_batchseq
+from mw_ia.training.snapshot_store import SnapshotTrajectoryStore
+
+
+@dataclass
+class _TrainingBatch:
+    """Conteneur batch + weights + tree_indices pour _sample_training_batch."""
+    batch: BatchSeq
+    weights: "np.ndarray | None"
+    tree_indices: "np.ndarray | None"
 
 
 class RecurrentDQNAgent(Agent):
@@ -52,10 +66,34 @@ class RecurrentDQNAgent(Agent):
         self.trainer = RecurrentDQNTrainer(
             self.online, self.target, lr=cfg.lr, gamma=cfg.gamma,
             device=str(self.device), use_amp=cfg.use_amp,
+            polyak_tau=cfg.polyak_tau,
         )
-        self.buffer = SequenceReplayBuffer(
-            cfg.replay_capacity, obs_dim, cfg.max_steps_per_episode, seed=seed,
-        )
+        if cfg.per_enabled:
+            self.buffer: SequenceReplayBuffer | PrioritizedSequenceReplayBuffer = (
+                PrioritizedSequenceReplayBuffer(
+                    cfg.replay_capacity, obs_dim, cfg.max_steps_per_episode,
+                    alpha=cfg.per_alpha, epsilon=cfg.per_epsilon, seed=seed,
+                )
+            )
+            self._beta_scheduler: BetaScheduler | None = BetaScheduler(
+                cfg.per_beta_start, cfg.per_beta_end, cfg.episodes,
+            )
+        else:
+            self.buffer = SequenceReplayBuffer(
+                cfg.replay_capacity, obs_dim, cfg.max_steps_per_episode, seed=seed,
+            )
+            self._beta_scheduler = None
+        if cfg.b1a_enabled:
+            self.snapshot_store: SnapshotTrajectoryStore | None = SnapshotTrajectoryStore(
+                obs_dim=obs_dim,
+                max_steps=cfg.max_steps_per_episode,
+                n_windows=cfg.b1a_n_windows,
+                snapshot_size=cfg.b1a_snapshot_size,
+                seed=seed,
+            )
+        else:
+            self.snapshot_store = None
+        self._episode_count: int = 0
         self.global_step: int = 0
         self.target_syncs: int = 0
         self.last_loss: float | None = None
@@ -104,27 +142,109 @@ class RecurrentDQNAgent(Agent):
         self.global_step += 1
         return {"epsilon": self.epsilon}
 
+    def on_new_best(self) -> int:
+        """Hook appele par le runner quand BestCheckpointTracker detecte un nouveau peak.
+
+        Si B1a active : capture jusqu'a snapshot_size trajectoires successful recentes
+        depuis self.buffer dans self.snapshot_store (sliding window N).
+        Si B1a desactive : no-op.
+
+        Returns: nombre de trajectoires effectivement capturees.
+        """
+        if not self.cfg.b1a_enabled:
+            return 0
+        assert self.snapshot_store is not None
+        return self.snapshot_store.capture_from(self.buffer)
+
+    def _sample_training_batch(self) -> _TrainingBatch:
+        """Build batch combine main + snapshot avec mix 80/20 si B1a actif.
+
+        Gere les 4 combinaisons PER x B1a. Retourne (batch, weights or None,
+        tree_indices or None for update_priorities main portion).
+        """
+        B = self.cfg.batch_size
+        L = self.cfg.sequence_length
+
+        snapshot_B = int(B * self.cfg.b1a_mix_ratio) if self.cfg.b1a_enabled else 0
+        b1a_active = (
+            self.cfg.b1a_enabled
+            and snapshot_B > 0
+            and self.snapshot_store is not None
+            and len(self.snapshot_store) >= snapshot_B
+        )
+        main_B = B - snapshot_B if b1a_active else B
+
+        # --- Sample main portion ---
+        if self.cfg.per_enabled:
+            assert self._beta_scheduler is not None
+            beta = self._beta_scheduler.beta(self._episode_count)
+            prio = self.buffer.sample(main_B, L, beta=beta)  # type: ignore[call-arg]
+            main_batch = prio.batch
+            main_weights = prio.weights
+            tree_indices = prio.tree_indices
+        else:
+            main_batch = self.buffer.sample(main_B, L)
+            main_weights = None
+            tree_indices = None
+
+        if not b1a_active:
+            return _TrainingBatch(batch=main_batch, weights=main_weights, tree_indices=tree_indices)
+
+        # --- Sample snapshot portion ---
+        assert self.snapshot_store is not None
+        snapshot_batch = self.snapshot_store.sample(snapshot_B, L)
+        combined_batch = concat_batchseq(main_batch, snapshot_batch)
+
+        if self.cfg.per_enabled:
+            snapshot_weights = np.ones(snapshot_B, dtype=np.float32)
+            combined_weights = np.concatenate([main_weights, snapshot_weights])
+            return _TrainingBatch(
+                batch=combined_batch, weights=combined_weights, tree_indices=tree_indices,
+            )
+        else:
+            return _TrainingBatch(batch=combined_batch, weights=None, tree_indices=None)
+
     def end_episode(self) -> dict[str, float]:
         """Push la trajectoire dans le buffer + train_steps_per_episode batches.
 
         Doit être appelé par le runner après la boucle step de l'épisode.
+        V2-B0 : branche PER (sample IS-weighted + update_priorities) si
+        cfg.per_enabled, sinon V2-Y baseline strict.
+        V2-B1a : mixe snapshot store (frozen success trajectories) dans batch
+        si cfg.b1a_enabled ET snapshot rempli (>= snapshot_B).
         """
         if self._episode_trajectory:
             self.buffer.push_trajectory(self._episode_trajectory)
+        self._episode_count += 1
         metrics: dict[str, float] = {"epsilon": self.epsilon}
         if len(self.buffer) >= max(self.cfg.min_episodes_to_learn, self.cfg.batch_size):
             losses: list[float] = []
             for _ in range(self.cfg.train_steps_per_episode):
-                batch = self.buffer.sample(
-                    batch_size=self.cfg.batch_size, seq_len=self.cfg.sequence_length,
-                )
-                losses.append(self.trainer.step(batch))
+                tb = self._sample_training_batch()
+                if tb.weights is not None:
+                    loss, td_errors = self.trainer.step_with_priorities(
+                        tb.batch, tb.weights, eta=self.cfg.per_eta,
+                    )
+                    if tb.tree_indices is not None:
+                        main_B = len(tb.tree_indices)
+                        self.buffer.update_priorities(  # type: ignore[union-attr]
+                            tb.tree_indices, td_errors[:main_B],
+                        )
+                    losses.append(loss)
+                else:
+                    loss = self.trainer.step(tb.batch)
+                    losses.append(loss)
             if losses:
                 self.last_loss = sum(losses) / len(losses)
                 metrics["loss"] = self.last_loss
-        if self.global_step // self.cfg.target_sync_steps > self.target_syncs:
-            self.trainer.sync_target()
-            self.target_syncs += 1
+            if self.cfg.per_enabled and self._beta_scheduler is not None:
+                metrics["per_beta"] = self._beta_scheduler.beta(self._episode_count)
+        # V2-U : skip hard sync périodique si Polyak activé (le trainer.step()
+        # appelle déjà polyak_update à chaque train_step).
+        if self.cfg.polyak_tau == 0.0:
+            if self.global_step // self.cfg.target_sync_steps > self.target_syncs:
+                self.trainer.sync_target()
+                self.target_syncs += 1
         return metrics
 
     def learn(self, transition: Any) -> dict[str, float]:

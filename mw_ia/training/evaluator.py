@@ -69,6 +69,10 @@ class PeriodicEvaluator:
         total_reward = 0.0
         total_length = 0
         for seed in self.eval_seeds:
+            # V2-ZY duck-typing : reset hidden state pour agents LSTM
+            begin = getattr(agent, "begin_episode", None)
+            if begin is not None:
+                begin()
             state, info = self.eval_env.reset(seed=seed)
             maze = info["maze"]
             goal = self.eval_env.inner.cfg.goal

@@ -43,6 +43,7 @@ class _ConvDQNTrainer:
         device: str = "cuda",
         use_amp: bool = True,
         double_dqn: bool = True,
+        polyak_tau: float = 0.0,
     ) -> None:
         self.online = online
         self.target = target
@@ -53,6 +54,7 @@ class _ConvDQNTrainer:
         self.device = torch.device(device)
         self.use_amp = bool(use_amp and self.device.type == "cuda")
         self.double_dqn = double_dqn
+        self.polyak_tau = polyak_tau
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=lr)
         self.loss_fn = nn.SmoothL1Loss()
         self._scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -60,6 +62,17 @@ class _ConvDQNTrainer:
 
     def sync_target(self) -> None:
         self.target.load_state_dict(self.online.state_dict())
+
+    def polyak_update(self, tau: float) -> None:
+        """Soft update target ← τ × online + (1−τ) × target, in-place.
+
+        Voir spec V2-U : docs/superpowers/specs/2026-05-24-mw-ia-polyak-soft-target-design.md
+        """
+        with torch.no_grad():
+            for p_target, p_online in zip(
+                self.target.parameters(), self.online.parameters()
+            ):
+                p_target.data.mul_(1.0 - tau).add_(p_online.data, alpha=tau)
 
     def step(self, batch: Batch) -> float:
         B = batch.states.shape[0]
@@ -104,6 +117,9 @@ class _ConvDQNTrainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.online.parameters(), max_norm=10.0)
             self.optimizer.step()
+        # V2-U : soft Polyak update à chaque train_step si tau > 0
+        if self.polyak_tau > 0.0:
+            self.polyak_update(self.polyak_tau)
         return float(loss.detach().item())
 
 
@@ -146,6 +162,7 @@ class ConvDQNAgent:
             lr=cfg.lr, gamma=cfg.gamma,
             device=str(self.device), use_amp=cfg.use_amp,
             double_dqn=cfg.double_dqn,
+            polyak_tau=cfg.polyak_tau,
         )
         obs_dim = in_channels * rows * cols
         self.buffer = ReplayBuffer(cfg.replay_capacity, obs_dim, seed=seed)
@@ -188,9 +205,12 @@ class ConvDQNAgent:
             batch = self.buffer.sample(self.cfg.batch_size)
             self.last_loss = self.trainer.step(batch)
             metrics["loss"] = self.last_loss
-        if self.global_step % self.cfg.target_sync_steps == 0:
-            self.trainer.sync_target()
-            self.target_syncs += 1
+        # V2-U : skip hard sync périodique si Polyak activé (le trainer.step()
+        # appelle déjà polyak_update à chaque train_step).
+        if self.cfg.polyak_tau == 0.0:
+            if self.global_step % self.cfg.target_sync_steps == 0:
+                self.trainer.sync_target()
+                self.target_syncs += 1
         return metrics
 
     def save(self, path: str | Path) -> None:

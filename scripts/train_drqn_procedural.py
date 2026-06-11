@@ -35,9 +35,52 @@ def main() -> int:
                              "le DRQN/LSTM oscille catastrophiquement avec update=200 V2-X)")
     parser.add_argument("--scheduler-step", type=float, default=0.05,
                         help="Pas de difficulté du scheduler (default V2-Y : 0.05)")
+    parser.add_argument(
+        "--polyak-tau",
+        type=float,
+        default=0.0,
+        help="V2-U : soft Polyak target update tau. Default 0.0 = hard sync.",
+    )
+    parser.add_argument(
+        "--per",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="V2-B0 : Prioritized Experience Replay trajectory-level (Schaul 2015 + R2D2). "
+             "Default False = SequenceReplayBuffer uniforme baseline V2-Y.",
+    )
+    parser.add_argument("--per-alpha", type=float, default=0.6,
+                        help="V2-B0 : priority exponent alpha (default 0.6, Schaul 2015).")
+    parser.add_argument("--per-beta-start", type=float, default=0.4,
+                        help="V2-B0 : IS exponent beta initial (default 0.4, Schaul 2015).")
+    parser.add_argument("--per-beta-end", type=float, default=1.0,
+                        help="V2-B0 : IS exponent beta final (default 1.0, annealing complete).")
+    parser.add_argument("--per-eta", type=float, default=0.9,
+                        help="V2-B0 : R2D2 priority aggregation eta (default 0.9).")
+    parser.add_argument("--per-epsilon", type=float, default=1e-6,
+                        help="V2-B0 : small constant epsilon (default 1e-6) garantit priority > 0.")
+    parser.add_argument(
+        "--max-attempts-bfs",
+        type=int,
+        default=100,
+        help="ProceduralEnvConfig max_attempts_bfs (default 100). Recommande bench B0 : 500.",
+    )
+    parser.add_argument(
+        "--b1a",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="V2-B1a : Policy Snapshot Rehearsal - capture des trajectoires successful "
+             "depuis le buffer au moment du best eval (V2-V), inject 20%% dans chaque batch. "
+             "Default False = pas de rehearsal (V2-U / V2-B0 baseline).",
+    )
+    parser.add_argument("--b1a-snapshot-size", type=int, default=50,
+                        help="V2-B1a : nb de trajectoires capturees par best (default 50).")
+    parser.add_argument("--b1a-n-windows", type=int, default=3,
+                        help="V2-B1a : sliding window des N derniers bests (default 3).")
+    parser.add_argument("--b1a-mix-ratio", type=float, default=0.2,
+                        help="V2-B1a : fraction du batch venant du snapshot (default 0.2 = 20%%).")
     args = parser.parse_args()
 
-    proc_cfg = ProceduralEnvConfig(mode=args.mode)
+    proc_cfg = ProceduralEnvConfig(mode=args.mode, max_attempts_bfs=args.max_attempts_bfs)
     if args.mode == "obstacles":
         gen = RandomObstaclesGenerator(
             rows=proc_cfg.max_rows, cols=proc_cfg.max_cols,
@@ -55,6 +98,17 @@ def main() -> int:
         lstm_hidden=args.lstm_hidden,
         sequence_length=args.sequence_length,
         epsilon_decay_steps=args.epsilon_decay_steps,
+        polyak_tau=args.polyak_tau,
+        per_enabled=args.per,
+        per_alpha=args.per_alpha,
+        per_beta_start=args.per_beta_start,
+        per_beta_end=args.per_beta_end,
+        per_eta=args.per_eta,
+        per_epsilon=args.per_epsilon,
+        b1a_enabled=args.b1a,
+        b1a_snapshot_size=args.b1a_snapshot_size,
+        b1a_n_windows=args.b1a_n_windows,
+        b1a_mix_ratio=args.b1a_mix_ratio,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,

@@ -45,6 +45,41 @@ def main() -> int:
         help="Double DQN (Hasselt 2015) : online sélectionne, target évalue. "
              "Default V2-W. Utiliser --no-double-dqn pour reproduire V2-Z baseline.",
     )
+    parser.add_argument(
+        "--eval",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Évaluation périodique greedy sur seeds eval séparés (V2-V). "
+             "Default activé. Utiliser --no-eval pour reproduire baseline pre-V2-V.",
+    )
+    parser.add_argument(
+        "--eval-every-episodes",
+        type=int,
+        default=100,
+        help="Périodicité (ép) de l'évaluation greedy (default V2-V : 100).",
+    )
+    parser.add_argument(
+        "--eval-target-difficulty",
+        type=float,
+        default=0.30,
+        help="Difficulty FIXE pour l'eval greedy (default 0.30). "
+             "Sans diff fixe, le best capture l'agent trivial à diff=0 (winrate ~100%) "
+             "et n'est jamais battu par l'agent compétent à diff supérieure.",
+    )
+    parser.add_argument(
+        "--best-checkpoint-path",
+        type=str,
+        default=None,
+        help="Chemin .pt du best-checkpoint (default None = pas de sauvegarde disque). "
+             "Suggestion : checkpoints/v2v_best_seed{N}.pt",
+    )
+    parser.add_argument(
+        "--polyak-tau",
+        type=float,
+        default=0.0,
+        help="V2-U : soft Polyak target update tau. Default 0.0 = hard sync. "
+             "Recommande : 0.005 pour activer Polyak.",
+    )
     args = parser.parse_args()
 
     proc_cfg = ProceduralEnvConfig(mode=args.mode)
@@ -66,6 +101,11 @@ def main() -> int:
         epsilon_decay_steps=args.epsilon_decay_steps,
         target_sync_steps=args.target_sync_steps,
         double_dqn=args.double_dqn,
+        eval_enabled=args.eval,
+        eval_every_episodes=args.eval_every_episodes,
+        eval_target_difficulty=args.eval_target_difficulty,
+        best_checkpoint_path=args.best_checkpoint_path,
+        polyak_tau=args.polyak_tau,
     )
     sched_cfg = SchedulerConfig(
         update_interval=args.scheduler_update_interval,
